@@ -26,6 +26,7 @@ class SheetsWriterTest {
     void emptyCollectionProducesHeaderOnlyForClearedSheet() {
         var rows = SheetsWriter.prepareRows(List.of(), "now");
         assertEquals(1, rows.size());
+        assertEquals("Статус", rows.get(0).get(0));
     }
 
     @Test
