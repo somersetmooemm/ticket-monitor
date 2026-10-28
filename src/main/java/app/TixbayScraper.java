@@ -71,7 +71,7 @@ public class TixbayScraper {
             JsonNode data = root.get("data");
             if (data == null || !data.isArray()) continue;
             for (JsonNode o : data) {
-                if (!o.isObject() || !o.has("salePrice") || !o.has("sellingAmount")) continue;
+                if (!o.isObject() || !o.hasNonNull("id") || !o.has("salePrice") || !o.has("sellingAmount")) continue;
                 listings++;
                 if (eventId != null && o.hasNonNull("activityEventId")
                     && !eventId.equals(o.get("activityEventId").asText())) continue;
@@ -84,14 +84,14 @@ public class TixbayScraper {
                            + urls.stream().distinct().limit(10).toList()
                            + "; лотов в ответах " + listings + ", принято " + lots.size());
 
-        if (listings == 0 && captured.stream().noneMatch(n -> n.path("data").isArray())) {
+        if (listings == 0 || lots.isEmpty()) {
             throw new IllegalStateException("tixbay не вернул список предложений (ticketGroup). "
                                             + "Возможна блокировка или изменился формат ответа.");
         }
         return new ArrayList<>(lots.values());
     }
 
-    private Lot toLot(Event ev, String id, JsonNode o) {
+    Lot toLot(Event ev, String id, JsonNode o) {
         int qty = o.path("sellingAmount").asInt(1);
         double price = o.path("salePrice").asDouble();
         String currency = o.path("currencyVO").path("code").asText("HKD");
@@ -117,14 +117,14 @@ public class TixbayScraper {
         return new Lot(ev, id, category, qty, place, price, currency, maxRun, runs, ev.url());
     }
 
-    /** "537区 HH排 座位隨機" -> "Зона 537, ряд HH (места подряд)". */
+    /** "537区 HH排 座位隨機" -> "Зона 537, ряд HH". */
     static String place(String areaName) {
         String n = areaName.strip();
         if (n.isEmpty() || n.contains("区排座随机")) return "зона и ряд не указаны";
         Matcher m = ZONE_ROW.matcher(n);
-        if (m.find()) return "Зона " + m.group(1) + ", ряд " + m.group(2) + " (места подряд)";
+        if (m.find()) return "Зона " + m.group(1) + ", ряд " + m.group(2);
         m = ZONE_ANYROW.matcher(n);
-        if (m.find()) return "Зона " + m.group(1) + ", ряд не указан (места подряд)";
+        if (m.find()) return "Зона " + m.group(1) + ", ряд не указан";
         return n;
     }
 

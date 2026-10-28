@@ -4,7 +4,6 @@ import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.SheetsScopes;
-import com.google.api.services.sheets.v4.model.ClearValuesRequest;
 import com.google.api.services.sheets.v4.model.ValueRange;
 import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.auth.oauth2.GoogleCredentials;
@@ -53,6 +52,18 @@ public class SheetsWriter {
         String now = ZonedDateTime.now(zone).format(fmt);
 
         List<List<Object>> old = readOld();
+        List<List<Object>> out = prepareRows(old, lots, failedEvents, now);
+        // Один запрос вместо clear + update: при ошибке сети прежние данные не стираются.
+        // Дополняем до прежней длины, чтобы старые строки ниже нового списка исчезли.
+        int lastRow = Math.max(old.size() + 1, out.size());
+        while (out.size() < lastRow) out.add(new ArrayList<>(Collections.nCopies(HEADER.size(), "")));
+        sheets.spreadsheets().values().update(id, q(ACTUAL) + "!A1:P" + lastRow,
+                        new ValueRange().setValues(out))
+                .setValueInputOption("RAW").execute();
+    }
+
+    static List<List<Object>> prepareRows(List<List<Object>> old, List<Lot> lots,
+                                          Set<String> failedEvents, String now) {
         Map<String, Double> oldPrice = new HashMap<>();
         List<List<Object>> rows = new ArrayList<>();
         for (List<Object> r0 : old) {
@@ -61,11 +72,10 @@ public class SheetsWriter {
             Double p = num(r, C_PRICE);
             if (p != null) oldPrice.put(str(r, C_LOT), p);
             if (failedEvents.contains(str(r, C_EVENT))) {
-                r.set(0, "НЕ ПРОВЕРЕНО");   // событие не обновилось: строка старая, время последней проверки - в колонке "Обновлено"
+                r.set(0, "НЕ ПРОВЕРЕНО");
                 rows.add(r);
             }
         }
-
         boolean firstRun = old.isEmpty();
         for (Lot l : lots) {
             Double prev = oldPrice.get(l.lotId());
@@ -76,19 +86,14 @@ public class SheetsWriter {
                     l.maxRun() == null ? "" : l.maxRun(), l.runs() == null ? "" : l.runs(),
                     l.url(), now, l.lotId(), e.url()));
         }
-
-        rows.sort(Comparator
-                .comparing((List<Object> r) -> str(r, 1))
+        rows.sort(Comparator.comparing((List<Object> r) -> str(r, 1))
                 .thenComparing(r -> str(r, 3))
                 .thenComparing(r -> str(r, 5))
                 .thenComparing(r -> num(r, C_PRICE) == null ? 0.0 : num(r, C_PRICE)));
-
         List<List<Object>> out = new ArrayList<>();
         out.add(HEADER);
         out.addAll(rows);
-        sheets.spreadsheets().values().clear(id, q(ACTUAL) + "!A:P", new ClearValuesRequest()).execute();
-        sheets.spreadsheets().values().update(id, q(ACTUAL) + "!A1", new ValueRange().setValues(out))
-                .setValueInputOption("RAW").execute();
+        return out;
     }
 
     private void append(String sheet, List<Object> header, List<List<Object>> rows) throws Exception {

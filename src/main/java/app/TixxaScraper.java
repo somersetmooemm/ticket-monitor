@@ -31,6 +31,7 @@ public class TixxaScraper {
             "prev => { const a = [...document.querySelectorAll('a[href]')]"
             + ".find(x => /-\\d+\\/\\d+$/.test(x.href)); return !a || a.href !== prev; }";
     private static final int MAX_PAGES = 80;
+    private static final int PAGE_SIZE = 6;
 
     public List<Lot> scrape(Page page, Event ev) {
         Matcher m = EVENT_ID.matcher(ev.url());
@@ -52,17 +53,56 @@ public class TixxaScraper {
 
         Map<String, Lot> lots = new LinkedHashMap<>();
         int pagesRead = 0;
+        boolean finished = false;
         for (int p = 1; p <= MAX_PAGES; p++) {
             int before = lots.size();
             String firstHref = firstLotHref(page, hrefPattern);
-            collect(page, ev, hrefPattern, lots);
+            int invalid = collect(page, ev, hrefPattern, lots);
+            if (invalid > 0) throw new IllegalStateException("tixxa: не разобрано лотов на странице " + p + ": " + invalid);
             pagesRead = p;
-            if (lots.size() == before) break;                  // новых лотов нет - страницы кончились
-            if (!openPage(page, p + 1, firstHref)) break;
+            int added = lots.size() - before;
+            requireNewLots(p, added);
+            int advertisedLast = lastPageNumber(page);
+            if (advertisedLast > MAX_PAGES) {
+                throw new IllegalStateException("tixxa: страниц больше лимита " + MAX_PAGES);
+            }
+            if (advertisedLast > 0 && p >= advertisedLast) {
+                finished = true;
+                break;
+            }
+            if (advertisedLast == 0 && added < PAGE_SIZE) {
+                finished = true;
+                break;
+            }
+            if (!openPage(page, p + 1, firstHref)) {
+                // Без явного подтверждения конца выдачи неполный результат нельзя публиковать.
+                throw new IllegalStateException("tixxa: не удалось открыть страницу " + (p + 1)
+                        + "; прочитано " + p + ", лотов " + lots.size());
+            }
+        }
+        if (!finished || lots.isEmpty()) {
+            throw new IllegalStateException("tixxa: не удалось подтвердить полную выгрузку; страниц " + pagesRead);
         }
         System.out.println("  tixxa: прочитано страниц " + pagesRead + ", лотов " + lots.size()
                            + ", JSON-запросы страницы: " + jsonUrls.stream().distinct().limit(8).toList());
         return new ArrayList<>(lots.values());
+    }
+
+    /** Номер последней страницы, когда сайт явно показывает цифровую пагинацию. */
+    private int lastPageNumber(Page page) {
+        Object result = page.evaluate("""
+                () => Array.from(document.querySelectorAll('nav button, nav a, [class*=pagination] button, [class*=pagination] a, [aria-label*=pagination] button'))
+                  .map(x => (x.textContent || '').trim())
+                  .filter(x => /^\\d+$/.test(x))
+                  .map(Number)
+                """);
+        int max = 0;
+        if (result instanceof List<?> numbers) {
+            for (Object value : numbers) {
+                if (value instanceof Number n) max = Math.max(max, n.intValue());
+            }
+        }
+        return max;
     }
 
     private String firstLotHref(Page page, Pattern hrefPattern) {
@@ -73,7 +113,8 @@ public class TixxaScraper {
         return "";
     }
 
-    private void collect(Page page, Event ev, Pattern hrefPattern, Map<String, Lot> lots) {
+    private int collect(Page page, Event ev, Pattern hrefPattern, Map<String, Lot> lots) {
+        int invalid = 0;
         Object res = page.evalOnSelectorAll("a[href]", "els => els.map(e => [e.href, e.innerText])");
         for (Object o : (List<?>) res) {
             List<?> r = (List<?>) o;
@@ -84,15 +125,31 @@ public class TixxaScraper {
             Matcher lm = LOT.matcher(text);
             if (!lm.find()) {
                 System.err.println("Не удалось разобрать лот tixxa: " + text);
+                invalid++;
                 continue;
             }
-            String place = lm.group(1).strip();
-            String category = "номинал " + lm.group(2).replace(",", "") + " " + lm.group(3);
-            int qty = Integer.parseInt(lm.group(4));
-            double price = Double.parseDouble(lm.group(6).replace(",", ""));
-            String id = "tixxa:" + hm.group(1);
-            lots.putIfAbsent(id, new Lot(ev, id, category, qty, place, price, lm.group(7), null, null, href));
+            Lot lot = parseLot(ev, href, text);
+            lots.putIfAbsent(lot.lotId(), lot);
         }
+        return invalid;
+    }
+
+    static void requireNewLots(int pageNumber, int added) {
+        if (added <= 0) throw new IllegalStateException("tixxa: страница " + pageNumber
+                + " не дала новых лотов; сбор неполный");
+    }
+
+    static Lot parseLot(Event ev, String href, String text) {
+        Matcher eventMatch = EVENT_ID.matcher(ev.url());
+        if (!eventMatch.find()) throw new IllegalArgumentException("Не найден id события в URL");
+        Matcher hrefMatch = Pattern.compile("-" + eventMatch.group(1) + "/(\\d+)$").matcher(href);
+        if (!hrefMatch.find()) throw new IllegalArgumentException("Ссылка на лот не относится к событию: " + href);
+        Matcher m = LOT.matcher(text.replaceAll("\\s+", " ").strip());
+        if (!m.matches()) throw new IllegalArgumentException("Не удалось разобрать лот: " + text);
+        return new Lot(ev, "tixxa:" + hrefMatch.group(1),
+                "номинал " + m.group(2).replace(",", "") + " " + m.group(3),
+                Integer.parseInt(m.group(4)), m.group(1).strip(),
+                Double.parseDouble(m.group(6).replace(",", "")), m.group(7), null, null, href);
     }
 
     /** Пробует несколько способов нажать на страницу n и ждёт, пока список лотов реально обновится. */

@@ -14,12 +14,19 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class Main {
 
+    static boolean tooManyFailures(int total, int failed) {
+        if (total <= 0) throw new IllegalArgumentException("Количество событий должно быть положительным");
+        if (failed < 0 || failed > total) throw new IllegalArgumentException("Некорректное количество ошибок");
+        return (long) failed * 4 >= total;
+    }
+
     private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     public static void main(String[] args) throws Exception {
         List<Event> events = EventsLoader.load();
         System.out.println("Событий к проверке: " + events.size());
+        if (events.isEmpty()) throw new IllegalStateException("Список событий пуст: не обновляем таблицу");
 
         SheetsWriter sheets = new SheetsWriter();
 
@@ -43,6 +50,7 @@ public class Main {
                         case "tixbay" -> tixbay.scrape(page, e);
                         default -> throw new IllegalArgumentException("Неизвестная площадка: " + e.platform());
                     };
+                    if (lots.isEmpty()) throw new IllegalStateException("Парсер вернул 0 лотов: данные не подтверждены");
                     System.out.println(label + ": лотов " + lots.size());
                     all.addAll(lots);
                 } catch (Exception ex) {
@@ -61,6 +69,6 @@ public class Main {
         System.out.println("Записано лотов: " + all.size() + ", ошибок: " + errors.size());
 
         // Запуск считается неуспешным, если не собралась четверть событий и больше - GitHub пришлёт письмо
-        if (!events.isEmpty() && failed.size() * 4 >= events.size()) System.exit(1);
+        if (tooManyFailures(events.size(), failed.size())) System.exit(1);
     }
 }
