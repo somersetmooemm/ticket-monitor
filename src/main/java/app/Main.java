@@ -1,10 +1,6 @@
 package app;
 
-import com.microsoft.playwright.Browser;
-import com.microsoft.playwright.BrowserContext;
-import com.microsoft.playwright.BrowserType;
-import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.*;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -14,15 +10,13 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class Main {
 
-    private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+    private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     public static void main(String[] args) throws Exception {
         List<Event> events = EventsLoader.load();
         System.out.println("Событий к проверке: " + events.size());
 
         SheetsWriter sheets = new SheetsWriter();
-        sheets.ensureSheets();
 
         List<Lot> all = new ArrayList<>();
         Set<String> failed = new HashSet<>();

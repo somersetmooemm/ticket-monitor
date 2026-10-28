@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -53,10 +54,16 @@ public class TixbayScraper {
 
     public List<Lot> scrape(Page page, Event ev) throws Exception {
         List<JsonNode> captured = new CopyOnWriteArrayList<>();
+        List<String> urls = new CopyOnWriteArrayList<>();
         Consumer<Response> handler = resp -> {
             try {
                 String ct = resp.headers().getOrDefault("content-type", "");
-                if (ct.contains("json")) captured.add(om.readTree(resp.text()));
+                if (ct.contains("json")) {
+                    captured.add(om.readTree(resp.text()));
+                    String u = resp.url();
+                    int q = u.indexOf('?');
+                    urls.add(q > 0 ? u.substring(0, q) : u);
+                }
             } catch (Exception ignored) {
                 // не JSON или тело недоступно - пропускаем
             }
@@ -72,6 +79,8 @@ public class TixbayScraper {
         List<Seat> seats = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         boolean priceFieldFound = false;
+        int withPrice = 0;
+        Set<String> statuses = new LinkedHashSet<>();
 
         for (JsonNode root : captured) {
             List<JsonNode> arrays = new ArrayList<>();
@@ -83,6 +92,9 @@ public class TixbayScraper {
                     Double price = p == null ? null : toDouble(p);
                     if (price == null) continue;
                     priceFieldFound = true;
+                    withPrice++;
+                    JsonNode stNode = field(o, "status");
+                    if (stNode != null && statuses.size() < 10) statuses.add(text(stNode));
                     if (!isAvailable(o)) continue;
 
                     String section = text(field(o, "section"));
@@ -104,9 +116,14 @@ public class TixbayScraper {
             }
         }
 
+        System.out.println("  tixbay: JSON-ответов " + captured.size() + " "
+                           + urls.stream().distinct().limit(10).toList()
+                           + "; объектов с ценой " + withPrice + ", свободных " + seats.size()
+                           + ", значения status: " + statuses);
+
         if (!priceFieldFound) {
             throw new IllegalStateException("В JSON-ответах tixbay не найдено поле с ценой. "
-                    + "Проверьте tixbay-mapping.properties и артефакт debug.");
+                                            + "Проверьте tixbay-mapping.properties и артефакт debug.");
         }
         return toLots(ev, seats);
     }
@@ -124,7 +141,7 @@ public class TixbayScraper {
             Seat f = g.get(0);
             String id = "tixbay:" + ev.url() + "#" + en.getKey();
             String where = (f.section().isEmpty() ? "" : "Сек. " + f.section())
-                    + (f.row().isEmpty() ? "" : ", ряд " + f.row());
+                           + (f.row().isEmpty() ? "" : ", ряд " + f.row());
             List<Integer> nums = g.stream().map(Seat::seatNo).filter(Objects::nonNull).toList();
 
             if (!nums.isEmpty() && nums.size() == g.size() && !f.row().isEmpty()) {
