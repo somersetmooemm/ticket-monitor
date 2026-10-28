@@ -1,10 +1,6 @@
 package app;
 
-import com.microsoft.playwright.Browser;
-import com.microsoft.playwright.BrowserContext;
-import com.microsoft.playwright.BrowserType;
-import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.*;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -22,7 +18,7 @@ public class Main {
     }
 
     private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+                                     + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     public static void main(String[] args) throws Exception {
         List<Event> events = EventsLoader.load();
@@ -51,7 +47,8 @@ public class Main {
                         case "tixbay" -> tixbay.scrape(page, e);
                         default -> throw new IllegalArgumentException("Неизвестная площадка: " + e.platform());
                     };
-                    if (lots.isEmpty()) throw new IllegalStateException("Парсер вернул 0 лотов: данные не подтверждены");
+                    if (lots.isEmpty())
+                        throw new IllegalStateException("Парсер вернул 0 лотов: данные не подтверждены");
                     LOG.info("event.ok label={} count={}", label, lots.size());
                     all.addAll(lots);
                 } catch (Exception ex) {

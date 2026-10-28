@@ -2,6 +2,7 @@ package app;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class TixbayScraperTest {
@@ -9,10 +10,11 @@ class TixbayScraperTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final TixbayScraper scraper = new TixbayScraper();
 
-    @Test void unknownAdjacentSeatsRemainUnknown() throws Exception {
+    @Test
+    void unknownAdjacentSeatsRemainUnknown() throws Exception {
         var json = mapper.readTree(""" 
-            {"sellingAmount":4,"salePrice":2250,"currencyVO":{"code":"THB"},"areaName":"537区 HH排 座位隨機"}
-            """);
+                {"sellingAmount":4,"salePrice":2250,"currencyVO":{"code":"THB"},"areaName":"537区 HH排 座位隨機"}
+                """);
         Lot lot = scraper.toLot(EVENT, "tixbay:42", json);
         assertNull(lot.maxRun());
         assertEquals("нет данных", lot.runs());
@@ -22,23 +24,26 @@ class TixbayScraperTest {
         assertEquals(4, lot.qty());
     }
 
-    @Test void adjacentOptionsAreExtracted() throws Exception {
+    @Test
+    void adjacentOptionsAreExtracted() throws Exception {
         var json = mapper.readTree("""
-            {"sellingAmount":4,"salePrice":1000,"availableNumbers":[1,2,4],"currencyVO":{"code":"THB"}}
-            """);
+                {"sellingAmount":4,"salePrice":1000,"availableNumbers":[1,2,4],"currencyVO":{"code":"THB"}}
+                """);
         Lot lot = scraper.toLot(EVENT, "tixbay:43", json);
         assertEquals(Integer.valueOf(4), lot.maxRun());
         assertEquals("1, 2, 4", lot.runs());
     }
 
-    @Test void emptyAdjacentOptionsRemainUnknown() throws Exception {
+    @Test
+    void emptyAdjacentOptionsRemainUnknown() throws Exception {
         var json = mapper.readTree("""
-            {"sellingAmount":2,"salePrice":1000,"availableNumbers":[]}
-            """);
+                {"sellingAmount":2,"salePrice":1000,"availableNumbers":[]}
+                """);
         assertNull(scraper.toLot(EVENT, "tixbay:44", json).maxRun());
     }
 
-    @Test void areaFormattingDoesNotPromiseSeats() {
+    @Test
+    void areaFormattingDoesNotPromiseSeats() {
         assertEquals("зона и ряд не указаны", TixbayScraper.place(""));
         assertEquals("Зона 537, ряд HH", TixbayScraper.place("537区 HH排 座位隨機"));
     }

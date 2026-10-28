@@ -22,9 +22,9 @@ import java.util.regex.Pattern;
  * tixbay.com: страница открывается в браузере, сайт сам запрашивает список предложений
  * (api/v1/ticketGroup). Перехватываем этот ответ: data - массив лотов вида
  * {id, ticketCategorySpecification, areaName, sellingAmount, availableNumbers, salePrice, currencyVO, ...}.
- *
+ * <p>
  * ВАЖНО: одна ссылка (eventId) = одна дата. Для каждой даты нужна своя строка в events.csv.
- *
+ * <p>
  * availableNumbers - сколько билетов можно взять из лота подряд (например [1,2,3,4]).
  * Сайт ограничивает заказ шестью билетами, поэтому у больших лотов максимум 6.
  */
@@ -37,7 +37,8 @@ public class TixbayScraper {
 
     private final ObjectMapper om = new ObjectMapper();
 
-    public TixbayScraper() {}
+    public TixbayScraper() {
+    }
 
     public List<Lot> scrape(Page page, Event ev) throws Exception {
         Matcher em = EVENT_ID.matcher(ev.url());
@@ -116,7 +117,9 @@ public class TixbayScraper {
         return new Lot(ev, id, category, qty, place, price, currency, maxRun, runs, ev.url());
     }
 
-    /** "537区 HH排 座位隨機" -> "Зона 537, ряд HH". */
+    /**
+     * "537区 HH排 座位隨機" -> "Зона 537, ряд HH".
+     */
     static String place(String areaName) {
         String n = areaName.strip();
         if (n.isEmpty() || n.contains("区排座随机")) return "зона и ряд не указаны";

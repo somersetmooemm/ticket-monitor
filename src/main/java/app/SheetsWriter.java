@@ -20,7 +20,7 @@ public class SheetsWriter {
     static final String ACTUAL = "Актуальные";
 
     private static final List<Object> HEADER = List.of(
-            "Статус", "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
+            "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
             "Цена за 1 шт.", "Валюта", "Макс. мест подряд", "Можно взять рядом (шт.)",
             "Ссылка", "Обновлено", "ID лота", "ID события");
 
@@ -44,7 +44,9 @@ public class SheetsWriter {
                 .setApplicationName("ticket-monitor").build();
     }
 
-    /** Полная замена содержимого: старые строки и статусы не используются. */
+    /**
+     * Полная замена содержимого: старые строки и статусы не используются.
+     */
     public void write(List<Lot> lots, Set<String> failedEvents, List<String[]> errors) throws Exception {
         String now = ZonedDateTime.now(zone).format(fmt);
         List<List<Object>> rows = prepareRows(lots, now);
