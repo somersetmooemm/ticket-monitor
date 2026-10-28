@@ -111,8 +111,8 @@ public class TixbayScraper {
             maxRun = max;
             runs = String.join(", ", nums);
         } else {
-            maxRun = qty;                          // список вариантов сайт не дал: считаем весь лот
-            runs = "нет данных (весь лот: " + qty + ")";
+            maxRun = null;                         // сайт не дал список вариантов - не утверждаем, что места рядом
+            runs = "нет данных";
         }
         return new Lot(ev, id, category, qty, place, price, currency, maxRun, runs, ev.url());
     }

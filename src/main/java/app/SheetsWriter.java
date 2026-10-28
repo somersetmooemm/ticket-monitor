@@ -20,7 +20,10 @@ public class SheetsWriter {
 
     static final String ACTUAL = "Актуальные";
 
-    private static final List<Object> HEADER = List.of("Статус", "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место", "Цена за 1 шт.", "Валюта", "Макс. мест подряд", "Блоков подряд (1 | 2 | 3 | 4+)", "Ссылка", "Обновлено", "ID лота", "ID события");
+    private static final List<Object> HEADER = List.of(
+            "Статус", "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
+            "Цена за 1 шт.", "Валюта", "Макс. мест подряд", "Можно взять рядом (шт.)",
+            "Ссылка", "Обновлено", "ID лота", "ID события");
     private static final int C_PRICE = 8, C_LOT = 14, C_EVENT = 15;
 
     private final Sheets sheets;
@@ -31,12 +34,16 @@ public class SheetsWriter {
     public SheetsWriter() throws Exception {
         String json = System.getenv("GOOGLE_CREDENTIALS_JSON");
         id = System.getenv("SPREADSHEET_ID");
-        if (json == null || id == null) {
+        if (json == null || json.isBlank() || id == null || id.isBlank()) {
             throw new IllegalStateException("Не заданы GOOGLE_CREDENTIALS_JSON и SPREADSHEET_ID");
         }
         zone = ZoneId.of(System.getenv().getOrDefault("TIMEZONE", "Europe/Moscow"));
-        GoogleCredentials creds = GoogleCredentials.fromStream(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8))).createScoped(List.of(SheetsScopes.SPREADSHEETS));
-        sheets = new Sheets.Builder(GoogleNetHttpTransport.newTrustedTransport(), GsonFactory.getDefaultInstance(), new HttpCredentialsAdapter(creds)).setApplicationName("ticket-monitor").build();
+        GoogleCredentials creds = GoogleCredentials
+                .fromStream(new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)))
+                .createScoped(List.of(SheetsScopes.SPREADSHEETS));
+        sheets = new Sheets.Builder(GoogleNetHttpTransport.newTrustedTransport(),
+                GsonFactory.getDefaultInstance(), new HttpCredentialsAdapter(creds))
+                .setApplicationName("ticket-monitor").build();
     }
 
     /**
@@ -54,7 +61,7 @@ public class SheetsWriter {
             Double p = num(r, C_PRICE);
             if (p != null) oldPrice.put(str(r, C_LOT), p);
             if (failedEvents.contains(str(r, C_EVENT))) {
-                r.set(0, "");
+                r.set(0, "НЕ ПРОВЕРЕНО");   // событие не обновилось: строка старая, время последней проверки - в колонке "Обновлено"
                 rows.add(r);
             }
         }
@@ -64,16 +71,24 @@ public class SheetsWriter {
             Double prev = oldPrice.get(l.lotId());
             String status = firstRun ? "" : prev == null ? "НОВЫЙ" : (l.price() < prev - 0.005 ? "↓ подешевел" : "");
             Event e = l.event();
-            rows.add(Arrays.asList(status, e.name(), e.city(), e.date(), e.platform(), l.category(), l.qty(), l.place(), l.price(), l.currency(), l.maxRun() == null ? "" : l.maxRun(), l.runs() == null ? "" : l.runs(), l.url(), now, l.lotId(), e.url()));
+            rows.add(Arrays.asList(status, e.name(), e.city(), e.date(), e.platform(), l.category(),
+                    l.qty(), l.place(), l.price(), l.currency(),
+                    l.maxRun() == null ? "" : l.maxRun(), l.runs() == null ? "" : l.runs(),
+                    l.url(), now, l.lotId(), e.url()));
         }
 
-        rows.sort(Comparator.comparing((List<Object> r) -> str(r, 1)).thenComparing(r -> str(r, 3)).thenComparing(r -> str(r, 5)).thenComparing(r -> num(r, C_PRICE) == null ? 0.0 : num(r, C_PRICE)));
+        rows.sort(Comparator
+                .comparing((List<Object> r) -> str(r, 1))
+                .thenComparing(r -> str(r, 3))
+                .thenComparing(r -> str(r, 5))
+                .thenComparing(r -> num(r, C_PRICE) == null ? 0.0 : num(r, C_PRICE)));
 
         List<List<Object>> out = new ArrayList<>();
         out.add(HEADER);
         out.addAll(rows);
         sheets.spreadsheets().values().clear(id, q(ACTUAL) + "!A:P", new ClearValuesRequest()).execute();
-        sheets.spreadsheets().values().update(id, q(ACTUAL) + "!A1", new ValueRange().setValues(out)).setValueInputOption("RAW").execute();
+        sheets.spreadsheets().values().update(id, q(ACTUAL) + "!A1", new ValueRange().setValues(out))
+                .setValueInputOption("RAW").execute();
     }
 
     private void append(String sheet, List<Object> header, List<List<Object>> rows) throws Exception {
@@ -82,11 +97,13 @@ public class SheetsWriter {
         List<List<Object>> all = new ArrayList<>();
         if (head.getValues() == null || head.getValues().isEmpty()) all.add(header);
         all.addAll(rows);
-        sheets.spreadsheets().values().append(id, q(sheet) + "!A1", new ValueRange().setValues(all)).setValueInputOption("RAW").setInsertDataOption("INSERT_ROWS").execute();
+        sheets.spreadsheets().values().append(id, q(sheet) + "!A1", new ValueRange().setValues(all))
+                .setValueInputOption("RAW").setInsertDataOption("INSERT_ROWS").execute();
     }
 
     private List<List<Object>> readOld() throws Exception {
-        ValueRange vr = sheets.spreadsheets().values().get(id, q(ACTUAL) + "!A2:P").setValueRenderOption("UNFORMATTED_VALUE").execute();
+        ValueRange vr = sheets.spreadsheets().values().get(id, q(ACTUAL) + "!A2:P")
+                .setValueRenderOption("UNFORMATTED_VALUE").execute();
         return vr.getValues() == null ? new ArrayList<>() : vr.getValues();
     }
 
@@ -99,13 +116,9 @@ public class SheetsWriter {
     }
 
     private static Double num(List<Object> r, int i) {
-        if (r.size() <= i || r.get(i) == null) {
-            return null;
-        }
+        if (r.size() <= i || r.get(i) == null) return null;
         Object o = r.get(i);
-        if (o instanceof Number n) {
-            return n.doubleValue();
-        }
+        if (o instanceof Number n) return n.doubleValue();
         try {
             return Double.parseDouble(o.toString().replace(",", "."));
         } catch (Exception e) {

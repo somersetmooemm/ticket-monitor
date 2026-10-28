@@ -1,6 +1,10 @@
 package app;
 
-import com.microsoft.playwright.*;
+import com.microsoft.playwright.Browser;
+import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.BrowserType;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Playwright;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -10,7 +14,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public class Main {
 
-    private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+    private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     public static void main(String[] args) throws Exception {
         List<Event> events = EventsLoader.load();
@@ -55,7 +60,7 @@ public class Main {
         sheets.write(all, failed, errors);
         System.out.println("Записано лотов: " + all.size() + ", ошибок: " + errors.size());
 
-        // Если упали все события - считаем запуск неуспешным, GitHub пришлёт письмо
-        if (!events.isEmpty() && failed.size() == events.size()) System.exit(1);
+        // Запуск считается неуспешным, если не собралась четверть событий и больше - GitHub пришлёт письмо
+        if (!events.isEmpty() && failed.size() * 4 >= events.size()) System.exit(1);
     }
 }
