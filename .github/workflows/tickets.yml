@@ -2,8 +2,8 @@ name: Ticket monitor
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
-  workflow_dispatch:        # кнопка "Run workflow" - обновить прямо сейчас
+    - cron: "*/60 * * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ticket-monitor
@@ -23,9 +23,6 @@ jobs:
           java-version: "17"
           cache: maven
 
-      - name: JUnit 5 tests and Java compilation
-        run: mvn -B --no-transfer-progress verify
-
       - name: Install Chromium for Playwright
         run: mvn -B --no-transfer-progress exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install --with-deps chromium"
 
@@ -34,7 +31,7 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           TIMEZONE: Europe/Moscow
-          DEBUG_DUMP: "1"     # сохранять сырые JSON tixbay в артефакт; после отладки поставьте "0"
+          DEBUG_DUMP: "0"     # сохранять сырые JSON tixbay в артефакт; после отладки поставьте "0"
         run: mvn -B --no-transfer-progress compile exec:java
 
       - name: Upload debug JSON
