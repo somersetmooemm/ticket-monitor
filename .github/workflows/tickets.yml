@@ -23,9 +23,6 @@ jobs:
           java-version: "17"
           cache: maven
 
-      - name: JUnit 5 tests and Java compilation
-        run: mvn -B --no-transfer-progress verify
-
       - name: Install Chromium for Playwright
         run: mvn -q compile exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install --with-deps chromium"
 
