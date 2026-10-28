@@ -1,52 +1,46 @@
 package app;
 
 import org.junit.jupiter.api.Test;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
+/** Regression tests: full replacement; old listings are never restored. */
 class SheetsGuardTest {
     private static final Event E = new Event("tixxa", "BTS", "Bangkok", "2026-12-05", "https://tixxa.co/concert-123");
 
-    private static List<List<Object>> old(int count) {
-        List<List<Object>> rows = new ArrayList<>();
-        for (int i=0; i<count; i++) {
-            List<Object> r = new ArrayList<>(Collections.nCopies(16, ""));
-            r.set(8, 1000); r.set(13, "2026-10-27 12:00"); r.set(14, "tixxa:" + i); r.set(15, E.url());
-            rows.add(r);
-        }
-        return rows;
-    }
     private static List<Lot> lots(int from, int to) {
         List<Lot> result = new ArrayList<>();
-        for (int i=from; i<to; i++) result.add(new Lot(E, "tixxa:" + i, "cat", 1, "place", 1000, "THB", null, null, E.url()+"/"+i));
+        for (int i = from; i < to; i++) {
+            result.add(new Lot(E, "tixxa:" + i, "cat", 1, "place", 1000, "THB", null, null, E.url() + "/" + i));
+        }
         return result;
     }
 
-    @Test void dropFrom146To59PreservesOldData() {
-        var guarded = SheetsWriter.detectSuspectEvents(old(146), lots(0,59), Set.of());
-        assertTrue(guarded.contains(E.url()));
-        var rows = SheetsWriter.prepareRows(old(146), List.of(), guarded, "2026-10-28 13:00");
-        assertEquals(147, rows.size());
-        assertEquals("НЕ ПРОВЕРЕНО", rows.get(1).get(0));
-        assertEquals("2026-10-27 12:00", rows.get(1).get(13));
+    @Test void droppingFrom146To59WritesOnly59CurrentLots() {
+        var rows = SheetsWriter.prepareRows(lots(0, 59), "2026-10-28 13:00");
+        assertEquals(60, rows.size()); // header + 59 current lots
+        assertEquals("tixxa:0", rows.get(1).get(14));
+        assertEquals("tixxa:58", rows.get(59).get(14));
+        assertTrue(rows.stream().skip(1).noneMatch(r -> "НЕ ПРОВЕРЕНО".equals(r.get(0))));
     }
 
-    @Test void smallNormalChangeAllowed() {
-        assertTrue(SheetsWriter.detectSuspectEvents(old(100), lots(0,90), Set.of()).isEmpty());
+    @Test void emptyCurrentRunProducesOnlyHeader() {
+        var rows = SheetsWriter.prepareRows(List.of(), "2026-10-28 13:00");
+        assertEquals(1, rows.size());
+        assertEquals("Статус", rows.get(0).get(0));
     }
 
-    @Test void newlyAddedListingsDoNotHideBigLossOfOldIds() {
-        var incoming = new ArrayList<>(lots(0,40));
-        incoming.addAll(lots(100,200));
-        assertTrue(SheetsWriter.detectSuspectEvents(old(100), incoming, Set.of()).contains(E.url()));
+    @Test void freshLotsReplacePriorIdsWithoutMerging() {
+        var rows = SheetsWriter.prepareRows(lots(100, 102), "2026-10-28 13:00");
+        assertEquals(3, rows.size());
+        assertEquals("tixxa:100", rows.get(1).get(14));
+        assertEquals("tixxa:101", rows.get(2).get(14));
     }
 
-    @Test void firstRunAndSmallEventNotBlocked() {
-        assertTrue(SheetsWriter.detectSuspectEvents(List.of(), lots(0,4), Set.of()).isEmpty());
-        assertTrue(SheetsWriter.detectSuspectEvents(old(5), lots(0,1), Set.of()).isEmpty());
-    }
-
-    @Test void explicitFailureAlwaysPreserved() {
-        assertTrue(SheetsWriter.detectSuspectEvents(old(100), lots(0,100), Set.of(E.url())).contains(E.url()));
+    @Test void currentRunHasNoRetainedFailureStatus() {
+        var rows = SheetsWriter.prepareRows(lots(0, 2), "2026-10-28 13:00");
+        assertEquals("", rows.get(1).get(0));
+        assertEquals("2026-10-28 13:00", rows.get(1).get(13));
     }
 }
