@@ -1,8 +1,6 @@
 name: Ticket monitor
 
 on:
-  schedule:
-    - cron: "*/60 * * * *"
   workflow_dispatch:
 
 concurrency:
