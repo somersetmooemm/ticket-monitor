@@ -29,4 +29,15 @@ class TixxaScraperTest {
         assertThrows(IllegalStateException.class, () -> TixxaScraper.requireNewLots(2, 0));
         assertDoesNotThrow(() -> TixxaScraper.requireNewLots(2, 6));
     }
+
+    @Test void unknownPaginationOnFullPageDoesNotStopScrape() {
+        assertFalse(TixxaScraper.isLastShortPage(0, 6, false));
+        assertFalse(TixxaScraper.isLastShortPage(0, 6, true));
+    }
+
+    @Test void shortPageWithoutNextCanEndScrape() {
+        assertTrue(TixxaScraper.isLastShortPage(0, 3, false));
+        assertFalse(TixxaScraper.isLastShortPage(0, 3, true));
+        assertFalse(TixxaScraper.isLastShortPage(5, 3, false));
+    }
 }

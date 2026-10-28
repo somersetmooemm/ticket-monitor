@@ -74,12 +74,20 @@ public class TixxaScraper {
                 finished = true;
                 break;
             }
-            // Малое количество новых лотов не доказывает конец выдачи.
-            // При отсутствии явной пагинации сохраняем старую таблицу вместо публикации неполных данных.
-            if (advertisedLast == 0) {
-                throw new IllegalStateException("tixxa: пагинация не подтверждена на странице " + p);
+            // 0 означает, что цифры пагинации не найдены, а не что пагинации нет.
+            // На короткой странице отсутствие следующей страницы подтверждает конец выборки.
+            if (isLastShortPage(advertisedLast, added, hasNextPage(page))) {
+                LOG.info("tixxa.pagination.end event={} page={} reason=short-page-no-next added={}", ev.date(), p, added);
+                finished = true;
+                break;
             }
             if (!openPage(page, p + 1, firstHref)) {
+                // Если сайт показывает явную неактивную кнопку Next, конец подтверждён.
+                if (advertisedLast == 0 && hasDisabledNext(page)) {
+                    finished = true;
+                    LOG.info("tixxa.pagination.end event={} page={} reason=disabled-next", ev.date(), p);
+                    break;
+                }
                 // Без явного подтверждения конца выдачи неполный результат нельзя публиковать.
                 throw new IllegalStateException("tixxa: не удалось открыть страницу " + (p + 1)
                         + "; прочитано " + p + ", лотов " + lots.size());
@@ -107,6 +115,33 @@ public class TixxaScraper {
             }
         }
         return max;
+    }
+
+    static boolean isLastShortPage(int advertisedLast, int added, boolean nextAvailable) {
+        return advertisedLast == 0 && added < PAGE_SIZE && !nextAvailable;
+    }
+
+    /** Учитываем только навигационные кнопки с явной семантикой Next. */
+    private boolean hasNextPage(Page page) {
+        return Boolean.TRUE.equals(page.evaluate("""
+                () => [...document.querySelectorAll('button,a,[role=button]')].some(e => {
+                  const txt = (e.getAttribute('aria-label') || e.textContent || '').trim().toLowerCase();
+                  const next = /^(next|next page|›|»|→|>)$/.test(txt);
+                  return next && !e.disabled && e.getAttribute('aria-disabled') !== 'true'
+                    && !e.closest('[aria-disabled=true], .disabled');
+                })
+                """));
+    }
+
+    private boolean hasDisabledNext(Page page) {
+        return Boolean.TRUE.equals(page.evaluate("""
+                () => [...document.querySelectorAll('button,a,[role=button]')].some(e => {
+                  const txt = (e.getAttribute('aria-label') || e.textContent || '').trim().toLowerCase();
+                  return /^(next|next page|›|»|→|>)$/.test(txt)
+                    && (e.disabled || e.getAttribute('aria-disabled') === 'true'
+                      || !!e.closest('[aria-disabled=true], .disabled'));
+                })
+                """));
     }
 
     private String firstLotHref(Page page, Pattern hrefPattern) {
@@ -160,15 +195,7 @@ public class TixxaScraper {
     private boolean openPage(Page page, int n, String previousHref) {
         for (int attempt = 1; attempt <= OPEN_RETRIES; attempt++) {
             LOG.info("tixxa.navigation targetPage={} attempt={}/{}", n, attempt, OPEN_RETRIES);
-            if (attempt > 1) {
-                try {
-                    page.reload(new Page.ReloadOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(30_000));
-                    // После reload страница может вернуться на первую страницу.
-                    // В таком случае не выдаём ложного подтверждения перехода.
-                } catch (Exception ex) {
-                    LOG.warn("tixxa.reload.failed page={} attempt={} reason={}", n, attempt, ex.toString());
-                }
-            }
+            // Не reload: он сбрасывает клиентскую пагинацию на страницу 1.
             if (tryOpenPage(page, n, previousHref)) return true;
             LOG.warn("tixxa.navigation.failed page={} attempt={}", n, attempt);
             page.waitForTimeout(1000L * attempt);
