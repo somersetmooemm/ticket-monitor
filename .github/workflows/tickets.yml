@@ -23,22 +23,27 @@ jobs:
           java-version: "17"
           cache: maven
 
+      - name: JUnit 5 tests and Java compilation
+        run: mvn -B --no-transfer-progress verify
+
       - name: Install Chromium for Playwright
-        run: mvn -q compile exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install --with-deps chromium"
+        run: mvn -B --no-transfer-progress exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install --with-deps chromium"
 
       - name: Collect tickets
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           TIMEZONE: Europe/Moscow
-          DEBUG_DUMP: "0"     # сохранять сырые JSON tixbay в артефакт; после отладки поставьте "0"
-        run: mvn -q compile exec:java
+          DEBUG_DUMP: "1"     # сохранять сырые JSON tixbay в артефакт; после отладки поставьте "0"
+        run: mvn -B --no-transfer-progress compile exec:java
 
       - name: Upload debug JSON
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: debug
-          path: debug/
+          path: |
+            debug/
+            logs/
           if-no-files-found: ignore
           retention-days: 3

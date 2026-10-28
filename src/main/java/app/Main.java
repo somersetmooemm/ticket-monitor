@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class Main {
+    private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(Main.class);
 
     static boolean tooManyFailures(int total, int failed) {
         if (total <= 0) throw new IllegalArgumentException("Количество событий должно быть положительным");
@@ -25,7 +26,7 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
         List<Event> events = EventsLoader.load();
-        System.out.println("Событий к проверке: " + events.size());
+        LOG.info("run.start events={}", events.size());
         if (events.isEmpty()) throw new IllegalStateException("Список событий пуст: не обновляем таблицу");
 
         SheetsWriter sheets = new SheetsWriter();
@@ -51,10 +52,10 @@ public class Main {
                         default -> throw new IllegalArgumentException("Неизвестная площадка: " + e.platform());
                     };
                     if (lots.isEmpty()) throw new IllegalStateException("Парсер вернул 0 лотов: данные не подтверждены");
-                    System.out.println(label + ": лотов " + lots.size());
+                    LOG.info("event.ok label={} count={}", label, lots.size());
                     all.addAll(lots);
                 } catch (Exception ex) {
-                    System.err.println(label + ": ОШИБКА " + ex);
+                    LOG.error("event.failed label={} reason={}", label, ex.toString());
                     failed.add(e.url());
                     errors.add(new String[]{label, String.valueOf(ex.getMessage())});
                 } finally {
@@ -66,7 +67,7 @@ public class Main {
         }
 
         sheets.write(all, failed, errors);
-        System.out.println("Записано лотов: " + all.size() + ", ошибок: " + errors.size());
+        LOG.info("run.end collected={} failed={} total={}", all.size(), errors.size(), events.size());
 
         // Запуск считается неуспешным, если не собралась четверть событий и больше - GitHub пришлёт письмо
         if (tooManyFailures(events.size(), failed.size())) System.exit(1);

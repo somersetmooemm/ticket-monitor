@@ -16,6 +16,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class SheetsWriter {
+    private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(SheetsWriter.class);
+    static final double MIN_RETAINED_RATIO = 0.70;
 
     static final String ACTUAL = "Актуальные";
 
@@ -52,7 +54,10 @@ public class SheetsWriter {
         String now = ZonedDateTime.now(zone).format(fmt);
 
         List<List<Object>> old = readOld();
-        List<List<Object>> out = prepareRows(old, lots, failedEvents, now);
+        Set<String> guarded = detectSuspectEvents(old, lots, failedEvents);
+        List<Lot> safe = lots.stream().filter(l -> !guarded.contains(l.event().url())).toList();
+        List<List<Object>> out = prepareRows(old, safe, guarded, now);
+        LOG.info("sheets.write old={} collected={} accepted={} guarded={} output={}", old.size(), lots.size(), safe.size(), guarded.size(), out.size()-1);
         // Один запрос вместо clear + update: при ошибке сети прежние данные не стираются.
         // Дополняем до прежней длины, чтобы старые строки ниже нового списка исчезли.
         int lastRow = Math.max(old.size() + 1, out.size());
@@ -60,6 +65,31 @@ public class SheetsWriter {
         sheets.spreadsheets().values().update(id, q(ACTUAL) + "!A1:P" + lastRow,
                         new ValueRange().setValues(out))
                 .setValueInputOption("RAW").execute();
+    }
+
+    /** Protect against partial scrapes that returned some listings but lost many old IDs. */
+    static Set<String> detectSuspectEvents(List<List<Object>> old, List<Lot> incoming, Set<String> failures) {
+        Set<String> guarded = new HashSet<>(failures);
+        Map<String, Set<String>> oldIds = new HashMap<>();
+        Map<String, Set<String>> newIds = new HashMap<>();
+        for (List<Object> row : old) {
+            String url = str(row, C_EVENT);
+            String id = str(row, C_LOT);
+            if (!url.isBlank() && !id.isBlank()) oldIds.computeIfAbsent(url, x -> new HashSet<>()).add(id);
+        }
+        for (Lot l : incoming) newIds.computeIfAbsent(l.event().url(), x -> new HashSet<>()).add(l.lotId());
+        for (var entry : newIds.entrySet()) {
+            String url = entry.getKey();
+            Set<String> prior = oldIds.getOrDefault(url, Set.of());
+            if (prior.size() < 10 || guarded.contains(url)) continue;
+            long retained = entry.getValue().stream().filter(prior::contains).count();
+            if (retained < Math.ceil(prior.size() * MIN_RETAINED_RATIO)) {
+                guarded.add(url);
+                LOG.warn("sheets.suspect event={} previous={} current={} retained={} minRatio={}",
+                        url.replaceAll("\\?.*$", ""), prior.size(), entry.getValue().size(), retained, MIN_RETAINED_RATIO);
+            }
+        }
+        return guarded;
     }
 
     static List<List<Object>> prepareRows(List<List<Object>> old, List<Lot> lots,

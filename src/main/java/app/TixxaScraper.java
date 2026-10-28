@@ -21,6 +21,9 @@ import java.util.regex.Pattern;
  * Цена за 1 билет, без доставки.
  */
 public class TixxaScraper {
+    private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(TixxaScraper.class);
+    private static final int OPEN_RETRIES = 3;
+
 
     private static final Pattern EVENT_ID = Pattern.compile("-(\\d+)/?$");
     // "Tickets?" - раньше было только "Ticket", из-за чего пропадали все лоты с количеством 2 и больше
@@ -66,13 +69,15 @@ public class TixxaScraper {
             if (advertisedLast > MAX_PAGES) {
                 throw new IllegalStateException("tixxa: страниц больше лимита " + MAX_PAGES);
             }
+            LOG.info("tixxa.page event={} page={} added={} total={} advertisedLast={}", ev.date(), p, added, lots.size(), advertisedLast);
             if (advertisedLast > 0 && p >= advertisedLast) {
                 finished = true;
                 break;
             }
-            if (advertisedLast == 0 && added < PAGE_SIZE) {
-                finished = true;
-                break;
+            // Малое количество новых лотов не доказывает конец выдачи.
+            // При отсутствии явной пагинации сохраняем старую таблицу вместо публикации неполных данных.
+            if (advertisedLast == 0) {
+                throw new IllegalStateException("tixxa: пагинация не подтверждена на странице " + p);
             }
             if (!openPage(page, p + 1, firstHref)) {
                 // Без явного подтверждения конца выдачи неполный результат нельзя публиковать.
@@ -83,8 +88,7 @@ public class TixxaScraper {
         if (!finished || lots.isEmpty()) {
             throw new IllegalStateException("tixxa: не удалось подтвердить полную выгрузку; страниц " + pagesRead);
         }
-        System.out.println("  tixxa: прочитано страниц " + pagesRead + ", лотов " + lots.size()
-                           + ", JSON-запросы страницы: " + jsonUrls.stream().distinct().limit(8).toList());
+        LOG.info("tixxa.complete event={} pages={} lots={} jsonResponseCount={}", ev.date(), pagesRead, lots.size(), jsonUrls.size());
         return new ArrayList<>(lots.values());
     }
 
@@ -124,7 +128,7 @@ public class TixxaScraper {
             String text = String.valueOf(r.get(1)).replaceAll("\\s+", " ").strip();
             Matcher lm = LOT.matcher(text);
             if (!lm.find()) {
-                System.err.println("Не удалось разобрать лот tixxa: " + text);
+                LOG.warn("tixxa.invalidListing event={} pageTextLength={}", ev.date(), text.length());
                 invalid++;
                 continue;
             }
@@ -152,29 +156,48 @@ public class TixxaScraper {
                 Double.parseDouble(m.group(6).replace(",", "")), m.group(7), null, null, href);
     }
 
-    /** Пробует несколько способов нажать на страницу n и ждёт, пока список лотов реально обновится. */
-    private boolean openPage(Page page, int n, String firstHref) {
+    /** Повторные попытки перехода на страницу. Перед retry возвращаемся к известной странице. */
+    private boolean openPage(Page page, int n, String previousHref) {
+        for (int attempt = 1; attempt <= OPEN_RETRIES; attempt++) {
+            LOG.info("tixxa.navigation targetPage={} attempt={}/{}", n, attempt, OPEN_RETRIES);
+            if (attempt > 1) {
+                try {
+                    page.reload(new Page.ReloadOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED).setTimeout(30_000));
+                    // После reload страница может вернуться на первую страницу.
+                    // В таком случае не выдаём ложного подтверждения перехода.
+                } catch (Exception ex) {
+                    LOG.warn("tixxa.reload.failed page={} attempt={} reason={}", n, attempt, ex.toString());
+                }
+            }
+            if (tryOpenPage(page, n, previousHref)) return true;
+            LOG.warn("tixxa.navigation.failed page={} attempt={}", n, attempt);
+            page.waitForTimeout(1000L * attempt);
+        }
+        LOG.error("tixxa.navigation.exhausted page={}", n);
+        return false;
+    }
+
+    private boolean tryOpenPage(Page page, int n, String firstHref) {
         String exact = "^\\s*" + n + "\\s*$";
         List<Locator> candidates = List.of(
-                page.getByRole(AriaRole.LISTITEM)
-                        .filter(new Locator.FilterOptions().setHasText(Pattern.compile(exact))),
+                page.getByRole(AriaRole.LISTITEM).filter(new Locator.FilterOptions().setHasText(Pattern.compile(exact))),
                 page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName(String.valueOf(n)).setExact(true)),
                 page.getByText(String.valueOf(n), new Page.GetByTextOptions().setExact(true)),
                 page.locator("[aria-label*='next' i], button:has-text('›'), button:has-text('>'), li:has-text('›')")
         );
-        for (Locator c : candidates) {
+        for (int i=0; i<candidates.size(); i++) {
             try {
+                Locator c = candidates.get(i);
                 if (c.count() == 0) continue;
                 c.first().click(new Locator.ClickOptions().setTimeout(4_000));
-                page.waitForFunction(FIRST_LOT_JS, firstHref,
-                        new Page.WaitForFunctionOptions().setTimeout(8_000));
+                page.waitForFunction(FIRST_LOT_JS, firstHref, new Page.WaitForFunctionOptions().setTimeout(8_000));
                 page.waitForLoadState(LoadState.NETWORKIDLE);
+                LOG.info("tixxa.navigation.ok targetPage={} strategy={}", n, i);
                 return true;
-            } catch (Exception ignored) {
-                // пробуем следующий способ
+            } catch (Exception ex) {
+                LOG.debug("tixxa.navigation.strategy.failed page={} strategy={} reason={}", n, i, ex.toString());
             }
         }
-        System.out.println("  tixxa: не удалось открыть страницу " + n);
         return false;
     }
 }

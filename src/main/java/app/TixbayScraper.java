@@ -29,6 +29,7 @@ import java.util.regex.Pattern;
  * Сайт ограничивает заказ шестью билетами, поэтому у больших лотов максимум 6.
  */
 public class TixbayScraper {
+    private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(TixbayScraper.class);
 
     private static final Pattern EVENT_ID = Pattern.compile("eventId=(\\d+)");
     private static final Pattern ZONE_ROW = Pattern.compile("^(\\S+?)区?\\s+(\\S+?)排\\s+座位隨機$");
@@ -80,9 +81,7 @@ public class TixbayScraper {
             }
         }
 
-        System.out.println("  tixbay: JSON-ответов " + captured.size() + " "
-                           + urls.stream().distinct().limit(10).toList()
-                           + "; лотов в ответах " + listings + ", принято " + lots.size());
+        LOG.info("tixbay.complete event={} jsonResponses={} candidates={} accepted={}", ev.date(), captured.size(), listings, lots.size());
 
         if (listings == 0 || lots.isEmpty()) {
             throw new IllegalStateException("tixbay не вернул список предложений (ticketGroup). "
