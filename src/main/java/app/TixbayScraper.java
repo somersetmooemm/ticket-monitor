@@ -7,52 +7,41 @@ import com.microsoft.playwright.Response;
 import com.microsoft.playwright.options.WaitUntilState;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Properties;
-import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * tixbay.com: страница - SPA, данные приходят отдельными JSON-запросами.
- * Открываем страницу в браузере, перехватываем все JSON-ответы и ищем в них массивы объектов с ценой.
- * Названия полей настраиваются в tixbay-mapping.properties.
+ * tixbay.com: страница открывается в браузере, сайт сам запрашивает список предложений
+ * (api/v1/ticketGroup). Перехватываем этот ответ: data - массив лотов вида
+ * {id, ticketCategorySpecification, areaName, sellingAmount, availableNumbers, salePrice, currencyVO, ...}.
+ *
+ * ВАЖНО: одна ссылка (eventId) = одна дата. Для каждой даты нужна своя строка в events.csv.
+ *
+ * availableNumbers - сколько билетов можно взять из лота подряд (например [1,2,3,4]).
+ * Сайт ограничивает заказ шестью билетами, поэтому у больших лотов максимум 6.
  */
 public class TixbayScraper {
 
-    private record Seat(String category, String section, String row, Integer seatNo,
-                        int qty, double price, String currency) {}
+    private static final Pattern EVENT_ID = Pattern.compile("eventId=(\\d+)");
+    private static final Pattern ZONE_ROW = Pattern.compile("^(\\S+?)区?\\s+(\\S+?)排\\s+座位隨機$");
+    private static final Pattern ZONE_ANYROW = Pattern.compile("^(\\S+?)区?\\s+排數隨機\\s+座位隨機$");
 
     private final ObjectMapper om = new ObjectMapper();
-    private final Properties map = new Properties();
-    private final Set<String> availableValues = new HashSet<>();
 
-    public TixbayScraper() throws IOException {
-        try (InputStream in = TixbayScraper.class.getResourceAsStream("/tixbay-mapping.properties");
-             Reader r = new InputStreamReader(in, StandardCharsets.UTF_8)) {
-            map.load(r);
-        }
-        for (String s : map.getProperty("available.values", "").split(",")) {
-            availableValues.add(s.strip().toLowerCase());
-        }
-    }
+    public TixbayScraper() {}
 
     public List<Lot> scrape(Page page, Event ev) throws Exception {
+        Matcher em = EVENT_ID.matcher(ev.url());
+        String eventId = em.find() ? em.group(1) : null;
+
         List<JsonNode> captured = new CopyOnWriteArrayList<>();
         List<String> urls = new CopyOnWriteArrayList<>();
         Consumer<Response> handler = resp -> {
@@ -76,132 +65,67 @@ public class TixbayScraper {
 
         dump(ev, captured);
 
-        List<Seat> seats = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
-        boolean priceFieldFound = false;
-        int withPrice = 0;
-        Set<String> statuses = new LinkedHashSet<>();
-
+        Map<String, Lot> lots = new LinkedHashMap<>();
+        int listings = 0;
         for (JsonNode root : captured) {
-            List<JsonNode> arrays = new ArrayList<>();
-            findArrays(root, arrays);
-            for (JsonNode arr : arrays) {
-                for (JsonNode o : arr) {
-                    if (!o.isObject()) continue;
-                    JsonNode p = field(o, "price");
-                    Double price = p == null ? null : toDouble(p);
-                    if (price == null) continue;
-                    priceFieldFound = true;
-                    withPrice++;
-                    JsonNode stNode = field(o, "status");
-                    if (stNode != null && statuses.size() < 10) statuses.add(text(stNode));
-                    if (!isAvailable(o)) continue;
-
-                    String section = text(field(o, "section"));
-                    String row = text(field(o, "row"));
-                    String category = text(field(o, "category"));
-                    if (category.isEmpty()) category = section;
-                    String currency = text(field(o, "currency"));
-                    Integer seatNo = lastNumber(text(field(o, "seat")));
-                    Double q = field(o, "qty") == null ? null : toDouble(field(o, "qty"));
-                    int qty = q == null ? 1 : Math.max(1, q.intValue());
-
-                    if (seatNo != null) {
-                        String key = String.join("|", category, section, row, String.valueOf(seatNo),
-                                String.valueOf(price), currency);
-                        if (!seen.add(key)) continue;
-                    }
-                    seats.add(new Seat(category, section, row, seatNo, qty, price, currency));
-                }
+            JsonNode data = root.get("data");
+            if (data == null || !data.isArray()) continue;
+            for (JsonNode o : data) {
+                if (!o.isObject() || !o.has("salePrice") || !o.has("sellingAmount")) continue;
+                listings++;
+                if (eventId != null && o.hasNonNull("activityEventId")
+                    && !eventId.equals(o.get("activityEventId").asText())) continue;
+                String id = "tixbay:" + o.path("id").asText();
+                lots.putIfAbsent(id, toLot(ev, id, o));
             }
         }
 
         System.out.println("  tixbay: JSON-ответов " + captured.size() + " "
                            + urls.stream().distinct().limit(10).toList()
-                           + "; объектов с ценой " + withPrice + ", свободных " + seats.size()
-                           + ", значения status: " + statuses);
+                           + "; лотов в ответах " + listings + ", принято " + lots.size());
 
-        if (!priceFieldFound) {
-            throw new IllegalStateException("В JSON-ответах tixbay не найдено поле с ценой. "
-                                            + "Проверьте tixbay-mapping.properties и артефакт debug.");
+        if (listings == 0 && captured.stream().noneMatch(n -> n.path("data").isArray())) {
+            throw new IllegalStateException("tixbay не вернул список предложений (ticketGroup). "
+                                            + "Возможна блокировка или изменился формат ответа.");
         }
-        return toLots(ev, seats);
+        return new ArrayList<>(lots.values());
     }
 
-    private List<Lot> toLots(Event ev, List<Seat> seats) {
-        Map<String, List<Seat>> groups = new LinkedHashMap<>();
-        for (Seat s : seats) {
-            String key = String.join("|", s.category(), s.section(), s.row(),
-                    String.valueOf(s.price()), s.currency());
-            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(s);
-        }
-        List<Lot> lots = new ArrayList<>();
-        for (Map.Entry<String, List<Seat>> en : groups.entrySet()) {
-            List<Seat> g = en.getValue();
-            Seat f = g.get(0);
-            String id = "tixbay:" + ev.url() + "#" + en.getKey();
-            String where = (f.section().isEmpty() ? "" : "Сек. " + f.section())
-                           + (f.row().isEmpty() ? "" : ", ряд " + f.row());
-            List<Integer> nums = g.stream().map(Seat::seatNo).filter(Objects::nonNull).toList();
+    private Lot toLot(Event ev, String id, JsonNode o) {
+        int qty = o.path("sellingAmount").asInt(1);
+        double price = o.path("salePrice").asDouble();
+        String currency = o.path("currencyVO").path("code").asText("HKD");
+        String category = o.path("ticketCategorySpecification").asText("").strip();
+        String place = place(o.path("areaName").asText(""));
 
-            if (!nums.isEmpty() && nums.size() == g.size() && !f.row().isEmpty()) {
-                Adjacency.Result r = Adjacency.analyze(nums);
-                lots.add(new Lot(ev, id, f.category(), nums.size(), where + ", места " + r.ranges(),
-                        f.price(), f.currency(), r.maxRun(), r.variants(), ev.url()));
-            } else {
-                int qty = g.stream().mapToInt(Seat::qty).sum();
-                lots.add(new Lot(ev, id, f.category(), qty, where.isEmpty() ? "-" : where,
-                        f.price(), f.currency(), null, null, ev.url()));
+        Integer maxRun;
+        String runs;
+        JsonNode av = o.get("availableNumbers");
+        if (av != null && av.isArray() && av.size() > 0) {
+            int max = 0;
+            List<String> nums = new ArrayList<>();
+            for (JsonNode n : av) {
+                max = Math.max(max, n.asInt());
+                nums.add(String.valueOf(n.asInt()));
             }
+            maxRun = max;
+            runs = String.join(", ", nums);
+        } else {
+            maxRun = qty;                          // список вариантов сайт не дал: считаем весь лот
+            runs = "нет данных (весь лот: " + qty + ")";
         }
-        return lots;
+        return new Lot(ev, id, category, qty, place, price, currency, maxRun, runs, ev.url());
     }
 
-    // ---------- вспомогательное ----------
-
-    private void findArrays(JsonNode n, List<JsonNode> out) {
-        if (n.isArray()) {
-            if (n.size() > 0 && n.get(0).isObject()) out.add(n);
-            for (JsonNode c : n) findArrays(c, out);
-        } else if (n.isObject()) {
-            n.elements().forEachRemaining(c -> findArrays(c, out));
-        }
-    }
-
-    private JsonNode field(JsonNode obj, String key) {
-        for (String cand : map.getProperty(key, "").split(",")) {
-            String c = cand.strip();
-            if (c.isEmpty()) continue;
-            for (Iterator<String> it = obj.fieldNames(); it.hasNext(); ) {
-                String f = it.next();
-                if (f.equalsIgnoreCase(c) && !obj.get(f).isNull()) return obj.get(f);
-            }
-        }
-        return null;
-    }
-
-    private boolean isAvailable(JsonNode o) {
-        JsonNode st = field(o, "status");
-        return st == null || availableValues.contains(text(st).toLowerCase());
-    }
-
-    private static String text(JsonNode n) {
-        if (n == null) return "";
-        return n.isValueNode() ? n.asText().strip() : n.toString();
-    }
-
-    private static Double toDouble(JsonNode n) {
-        if (n.isNumber()) return n.asDouble();
-        try {
-            return Double.parseDouble(n.asText().replaceAll("[^0-9.]", ""));
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static Integer lastNumber(String s) {
-        Matcher m = Pattern.compile("(\\d+)\\D*$").matcher(s);
-        return m.find() ? Integer.valueOf(m.group(1)) : null;
+    /** "537区 HH排 座位隨機" -> "Зона 537, ряд HH (места подряд)". */
+    static String place(String areaName) {
+        String n = areaName.strip();
+        if (n.isEmpty() || n.contains("区排座随机")) return "зона и ряд не указаны";
+        Matcher m = ZONE_ROW.matcher(n);
+        if (m.find()) return "Зона " + m.group(1) + ", ряд " + m.group(2) + " (места подряд)";
+        m = ZONE_ANYROW.matcher(n);
+        if (m.find()) return "Зона " + m.group(1) + ", ряд не указан (места подряд)";
+        return n;
     }
 
     private void dump(Event ev, List<JsonNode> captured) throws IOException {
