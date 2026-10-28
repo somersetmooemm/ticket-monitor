@@ -1,0 +1,43 @@
+name: Ticket monitor
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:        # кнопка "Run workflow" - обновить прямо сейчас
+
+concurrency:
+  group: ticket-monitor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Install Chromium for Playwright
+        run: mvn -q compile exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install --with-deps chromium"
+
+      - name: Collect tickets
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          TIMEZONE: Europe/Moscow
+          DEBUG_DUMP: "1"     # сохранять сырые JSON tixbay в артефакт; после отладки поставьте "0"
+        run: mvn -q compile exec:java
+
+      - name: Upload debug JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 3

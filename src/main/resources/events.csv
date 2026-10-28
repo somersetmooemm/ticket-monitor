@@ -1,0 +1,17 @@
+# Список концертов. Чтобы добавить концерт - допишите строку. Чтобы отключить - поставьте no или поставьте # в начале.
+# Разделитель - точка с запятой. platform: tixxa или tixbay.
+enabled;platform;name;city;date;url
+yes;tixxa;BTS ARIRANG;Бангкок;3 дек;https://tixxa.co/en/3-dec-bts-world-tour-arirang-in-bangkok-1119
+yes;tixxa;BTS ARIRANG;Бангкок;5 дек;https://tixxa.co/en/5-dec-bts-world-tour-arirang-in-bangkok-1120
+yes;tixxa;BTS ARIRANG;Бангкок;6 дек;https://tixxa.co/en/6-dec-bts-world-tour-arirang-in-bangkok-1121
+yes;tixxa;BTS ARIRANG;Куала-Лумпур;12 дек;https://tixxa.co/en/12-dec-bts-world-tour-arirang-in-kuala-lumpur-1122
+yes;tixxa;BTS ARIRANG;Куала-Лумпур;13 дек;https://tixxa.co/en/13-dec-bts-world-tour-arirang-in-kuala-lumpur-1123
+yes;tixbay;BTS ARIRANG;Куала-Лумпур;12-13 дек;https://tixbay.com/seat?activityId=214242&eventId=3017308
+yes;tixxa;BTS ARIRANG;Сингапур;17 дек;https://tixxa.co/en/17-dec-bts-world-tour-arirang-in-singapore-1124
+yes;tixxa;BTS ARIRANG;Сингапур;19 дек;https://tixxa.co/en/19-dec-bts-world-tour-arirang-in-singapore-1125
+yes;tixxa;BTS ARIRANG;Сингапур;20 дек;https://tixxa.co/en/20-dec-bts-world-tour-arirang-in-singapore-1126
+yes;tixxa;BTS ARIRANG;Сингапур;22 дек;https://tixxa.co/en/22-dec-bts-world-tour-arirang-in-singapore-1127
+yes;tixbay;BTS ARIRANG;Сингапур;17-19-20-22 дек;https://tixbay.com/seat?activityId=214240&eventId=3017301
+yes;tixxa;Stray Kids Run It;Бангкок;16 янв;https://tixxa.co/en/16-jan-stray-kids-world-tour-run-it-bangkok-1499
+yes;tixxa;Stray Kids Run It;Бангкок;17 янв;https://tixxa.co/en/17-jan-stray-kids-world-tour-run-it-bangkok-1500
+yes;tixbay;BTS ARIRANG;Гонконг;4-6-7 марта;https://tixbay.com/seat?activityId=214239&eventId=3017297
