@@ -20,8 +20,8 @@ public class SheetsWriter {
     static final String ACTUAL = "Актуальные";
 
     private static final List<Object> HEADER = List.of(
-            "Статус", "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
-            "Цена за 1 шт.", "Валюта", "Макс. мест подряд", "Можно взять рядом (шт.)",
+            "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
+            "Цена за 1 шт.", "Валюта", "Итоговая стоимость за 1 шт. (₽)", "Макс. мест подряд", "Можно взять рядом (шт.)",
             "Ссылка", "Обновлено", "ID лота", "ID события");
 
     private final Sheets sheets;
@@ -49,7 +49,7 @@ public class SheetsWriter {
      */
     public void write(List<Lot> lots, Set<String> failedEvents, List<String[]> errors) throws Exception {
         String now = ZonedDateTime.now(zone).format(fmt);
-        List<List<Object>> rows = prepareRows(lots, now);
+        List<List<Object>> rows = prepareRows(lots, now, Rates.fetchCbr());
         LOG.info("sheets.replace.start collected={} failedEvents={} rows={}", lots.size(), failedEvents.size(), rows.size());
         // По требованию: сначала очищаем ВСЮ вкладку, затем записываем текущую выгрузку.
         // Это две операции API: если update упадёт после clear, лист останется пустым.
@@ -62,19 +62,19 @@ public class SheetsWriter {
         LOG.info("sheets.replace.complete currentLots={} failedEvents={}", lots.size(), failedEvents.size());
     }
 
-    static List<List<Object>> prepareRows(List<Lot> lots, String now) {
+    static List<List<Object>> prepareRows(List<Lot> lots, String now, Rates rates) {
         List<List<Object>> rows = new ArrayList<>();
         for (Lot l : lots) {
             Event e = l.event();
-            rows.add(new ArrayList<>(Arrays.asList("", e.name(), e.city(), e.date(), e.platform(), l.category(),
-                    l.qty(), l.place(), l.price(), l.currency(),
+            rows.add(new ArrayList<>(Arrays.asList(e.name(), e.city(), e.date(), e.platform(), l.category(),
+                    l.qty(), l.place(), l.price(), l.currency(), Cost.totalRub(l, rates),
                     l.maxRun() == null ? "" : l.maxRun(), l.runs() == null ? "" : l.runs(),
                     l.url(), now, l.lotId(), e.url())));
         }
-        rows.sort(Comparator.comparing((List<Object> r) -> String.valueOf(r.get(1)))
-                .thenComparing(r -> String.valueOf(r.get(3)))
-                .thenComparing(r -> String.valueOf(r.get(5)))
-                .thenComparingDouble(r -> ((Number) r.get(8)).doubleValue()));
+        rows.sort(Comparator.comparing((List<Object> r) -> String.valueOf(r.get(0)))
+                .thenComparing(r -> String.valueOf(r.get(2)))
+                .thenComparing(r -> String.valueOf(r.get(4)))
+                .thenComparingDouble(r -> ((Number) r.get(7)).doubleValue()));
         List<List<Object>> out = new ArrayList<>();
         out.add(HEADER);
         out.addAll(rows);
@@ -84,5 +84,4 @@ public class SheetsWriter {
     private static String q(String sheet) {
         return "'" + sheet + "'";
     }
-
 }

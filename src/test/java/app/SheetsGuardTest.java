@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Regression tests: full replacement; old listings are never restored.
  */
 class SheetsGuardTest {
+    private static final Rates RATES = new Rates(java.util.Map.of("THB", 2.5));
     private static final Event E = new Event("tixxa", "BTS", "Bangkok", "2026-12-05", "https://tixxa.co/concert-123");
 
     private static List<Lot> lots(int from, int to) {
@@ -24,22 +25,22 @@ class SheetsGuardTest {
 
     @Test
     void droppingFrom146To59WritesOnly59CurrentLots() {
-        var rows = SheetsWriter.prepareRows(lots(0, 59), "2026-10-28 13:00");
+        var rows = SheetsWriter.prepareRows(lots(0, 59), "2026-10-28 13:00", RATES);
         assertEquals(60, rows.size()); // header + 59 current lots
         assertEquals("tixxa:0", rows.get(1).get(14));
         assertEquals("tixxa:58", rows.get(59).get(14));
-        assertTrue(rows.stream().skip(1).noneMatch(r -> "НЕ ПРОВЕРЕНО".equals(r.get(0))));
+        assertTrue(rows.stream().skip(1).noneMatch(r -> "НЕ ПРОВЕРЕНО".equals(r.get(0)) || "НЕ ПРОВЕРЕНО".equals(r.get(1))));
     }
 
     @Test
     void emptyCurrentRunProducesOnlyHeader() {
-        var rows = SheetsWriter.prepareRows(List.of(), "2026-10-28 13:00");
+        var rows = SheetsWriter.prepareRows(List.of(), "2026-10-28 13:00", RATES);
         assertEquals(1, rows.size());
     }
 
     @Test
     void freshLotsReplacePriorIdsWithoutMerging() {
-        var rows = SheetsWriter.prepareRows(lots(100, 102), "2026-10-28 13:00");
+        var rows = SheetsWriter.prepareRows(lots(100, 102), "2026-10-28 13:00", RATES);
         assertEquals(3, rows.size());
         assertEquals("tixxa:100", rows.get(1).get(14));
         assertEquals("tixxa:101", rows.get(2).get(14));
@@ -47,8 +48,8 @@ class SheetsGuardTest {
 
     @Test
     void currentRunHasNoRetainedFailureStatus() {
-        var rows = SheetsWriter.prepareRows(lots(0, 2), "2026-10-28 13:00");
-        assertEquals("", rows.get(1).get(0));
+        var rows = SheetsWriter.prepareRows(lots(0, 2), "2026-10-28 13:00", RATES);
+        assertEquals("BTS", rows.get(1).get(0));
         assertEquals("2026-10-28 13:00", rows.get(1).get(13));
     }
 }
