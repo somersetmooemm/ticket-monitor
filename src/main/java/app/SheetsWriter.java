@@ -17,7 +17,7 @@ import java.util.*;
 
 public class SheetsWriter {
     private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(SheetsWriter.class);
-    static final String ACTUAL = "Предложения для менеджера";
+    static final String MANAGER = "Предложения для менеджера";
     static final String CLIENTS = "Предложения для клиента";
 
     private static final List<Object> CLIENT_HEADER = List.of(
@@ -59,10 +59,10 @@ public class SheetsWriter {
         LOG.info("sheets.replace.start collected={} failedEvents={} rows={}", lots.size(), failedEvents.size(), rows.size());
         // По требованию: сначала очищаем ВСЮ вкладку, затем записываем текущую выгрузку.
         // Это две операции API: если update упадёт после clear, лист останется пустым.
-        sheets.spreadsheets().values().clear(id, q(ACTUAL),
+        sheets.spreadsheets().values().clear(id, q(MANAGER),
                 new com.google.api.services.sheets.v4.model.ClearValuesRequest()).execute();
-        LOG.info("sheets.clear.complete sheet={}", ACTUAL);
-        sheets.spreadsheets().values().update(id, q(ACTUAL) + "!A1:P" + rows.size(),
+        LOG.info("sheets.clear.complete sheet={}", MANAGER);
+        sheets.spreadsheets().values().update(id, q(MANAGER) + "!A1:P" + rows.size(),
                         new ValueRange().setValues(rows))
                 .setValueInputOption("RAW").execute();
         LOG.info("sheets.replace.complete currentLots={} failedEvents={}", lots.size(), failedEvents.size());
@@ -77,13 +77,13 @@ public class SheetsWriter {
     private void writeClients(List<List<Object>> clientRows) throws Exception {
         String clientsId = System.getenv("CLIENTS_SPREADSHEET_ID");
         if (clientsId == null || clientsId.isBlank()) {
-            LOG.warn("sheets.clients.skipped reason=CLIENTS_SPREADSHEET_ID не задан");
-            return;
+            // Основная таблица уже записана; падаем громко, чтобы пропуск не остался незамеченным
+            throw new IllegalStateException("CLIENTS_SPREADSHEET_ID не задан: клиентская таблица не обновлена");
         }
         var first = sheets.spreadsheets().get(clientsId).setFields("sheets.properties(sheetId,title)").execute()
                 .getSheets().get(0).getProperties();
         String sheet = first.getTitle();
-        if (!CLIENTS.equals(sheet)) {
+        if (!CLIENTS.equals(sheet)) { // первый лист должен называться «Главная»
             var rename = new com.google.api.services.sheets.v4.model.Request().setUpdateSheetProperties(
                     new com.google.api.services.sheets.v4.model.UpdateSheetPropertiesRequest()
                             .setProperties(new com.google.api.services.sheets.v4.model.SheetProperties()
@@ -102,9 +102,7 @@ public class SheetsWriter {
         LOG.info("sheets.clients.complete sheet={} rows={}", sheet, clientRows.size() - 1);
     }
 
-    /**
-     * Данные для клиентской таблицы: концерт, страна, сектор, количество, итоговая сумма лота с комиссией.
-     */
+    /** Данные для клиентской таблицы: концерт, страна, сектор, количество, итоговая сумма лота с комиссией. */
     static List<List<Object>> prepareClientRows(List<Lot> lots, Rates rates) {
         List<List<Object>> rows = new ArrayList<>();
         for (Lot l : lots) {
@@ -140,9 +138,7 @@ public class SheetsWriter {
         return out;
     }
 
-    /**
-     * Создаёт лист с таким названием, если его нет в документе (иначе Sheets API отвечает «Unable to parse range»).
-     */
+    /** Создаёт лист с таким названием, если его нет в документе (иначе Sheets API отвечает «Unable to parse range»). */
     private void ensureSheet(String docId, String title) throws Exception {
         var all = sheets.spreadsheets().get(docId).setFields("sheets.properties.title").execute().getSheets();
         for (var sh : all) if (title.equals(sh.getProperties().getTitle())) return;
