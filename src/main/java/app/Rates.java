@@ -27,9 +27,7 @@ public final class Rates {
         this.rubPerUnit.put("RUB", 1.0);
     }
 
-    /**
-     * Курсы не получены: стоимость в рублях будет пустой, остальная выгрузка не пострадает.
-     */
+    /** Курсы не получены: стоимость в рублях будет пустой, остальная выгрузка не пострадает. */
     public static Rates none() {
         return new Rates(Map.of());
     }
@@ -63,9 +61,7 @@ public final class Rates {
         return new Rates(map);
     }
 
-    /**
-     * Курс в рублях за 1 единицу валюты или null, если валюта неизвестна.
-     */
+    /** Курс в рублях за 1 единицу валюты или null, если валюта неизвестна. */
     public Double rub(String currency) {
         return currency == null ? null : rubPerUnit.get(currency.strip().toUpperCase());
     }
