@@ -17,7 +17,10 @@ import java.util.*;
 
 public class SheetsWriter {
     private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(SheetsWriter.class);
-    static final String ACTUAL = "Актуальные";
+    static final String ACTUAL = "Предложения для менеджера";
+
+    private static final List<Object> CLIENT_HEADER = List.of(
+            "Название концерта", "Страна", "Сектор", "Количество", "Итоговая сумма с комиссией (₽)");
 
     private static final List<Object> HEADER = List.of(
             "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
@@ -49,7 +52,9 @@ public class SheetsWriter {
      */
     public void write(List<Lot> lots, Set<String> failedEvents, List<String[]> errors) throws Exception {
         String now = ZonedDateTime.now(zone).format(fmt);
-        List<List<Object>> rows = prepareRows(lots, now, Rates.fetchCbr());
+        Rates rates = Rates.fetchCbr();
+        List<List<Object>> rows = prepareRows(lots, now, rates);
+        List<List<Object>> clientRows = prepareClientRows(lots, rates);
         LOG.info("sheets.replace.start collected={} failedEvents={} rows={}", lots.size(), failedEvents.size(), rows.size());
         // По требованию: сначала очищаем ВСЮ вкладку, затем записываем текущую выгрузку.
         // Это две операции API: если update упадёт после clear, лист останется пустым.
@@ -60,6 +65,50 @@ public class SheetsWriter {
                         new ValueRange().setValues(rows))
                 .setValueInputOption("RAW").execute();
         LOG.info("sheets.replace.complete currentLots={} failedEvents={}", lots.size(), failedEvents.size());
+
+        writeClients(clientRows);
+    }
+
+    /**
+     * Отдельная таблица для клиентов (другой Google-документ): CLIENTS_SPREADSHEET_ID.
+     * Пишем в лист CLIENTS_SHEET, а если он не задан - в первый лист документа.
+     */
+    private void writeClients(List<List<Object>> clientRows) throws Exception {
+        String clientsId = System.getenv("CLIENTS_SPREADSHEET_ID");
+        if (clientsId == null || clientsId.isBlank()) {
+            LOG.warn("sheets.clients.skipped reason=CLIENTS_SPREADSHEET_ID не задан");
+            return;
+        }
+        String sheet = System.getenv("CLIENTS_SHEET");
+        if (sheet == null || sheet.isBlank()) {
+            sheet = sheets.spreadsheets().get(clientsId).setFields("sheets.properties.title").execute()
+                    .getSheets().get(0).getProperties().getTitle();
+        }
+        sheets.spreadsheets().values().clear(clientsId, q(sheet),
+                new com.google.api.services.sheets.v4.model.ClearValuesRequest()).execute();
+        sheets.spreadsheets().values().update(clientsId, q(sheet) + "!A1:E" + clientRows.size(),
+                        new ValueRange().setValues(clientRows))
+                .setValueInputOption("RAW").execute();
+        LOG.info("sheets.clients.complete sheet={} rows={}", sheet, clientRows.size() - 1);
+    }
+
+    /**
+     * Данные для клиентской таблицы: концерт, страна, сектор, количество, итоговая сумма лота с комиссией.
+     */
+    static List<List<Object>> prepareClientRows(List<Lot> lots, Rates rates) {
+        List<List<Object>> rows = new ArrayList<>();
+        for (Lot l : lots) {
+            rows.add(new ArrayList<>(Arrays.asList(l.event().name(), l.event().country(), l.place(),
+                    l.qty(), Cost.lotTotalRub(l, rates))));
+        }
+        rows.sort(Comparator.comparing((List<Object> r) -> String.valueOf(r.get(0)))
+                .thenComparing(r -> String.valueOf(r.get(1)))
+                .thenComparing(r -> String.valueOf(r.get(2)))
+                .thenComparingLong(r -> r.get(4) instanceof Long t ? t : Long.MAX_VALUE));
+        List<List<Object>> out = new ArrayList<>();
+        out.add(CLIENT_HEADER);
+        out.addAll(rows);
+        return out;
     }
 
     static List<List<Object>> prepareRows(List<Lot> lots, String now, Rates rates) {

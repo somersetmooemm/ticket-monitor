@@ -10,10 +10,23 @@ final class Cost {
     private Cost() {
     }
 
-    /** Сумма за 1 билет в рублях или "" (пустая ячейка), если курса валюты нет. */
+    /**
+     * Сумма за 1 билет в рублях или "" (пустая ячейка), если курса валюты нет.
+     */
     static Object totalRub(Lot l, Rates rates) {
         Double rate = rates.rub(l.currency());
         if (rate == null) return "";
         return Math.round(l.price() * rate + FEE_RUB);
+    }
+
+    /**
+     * Сумма за весь лот (кол-во × итоговая стоимость 1 билета, комиссия уже включена) или "".
+     */
+    static Object lotTotalRub(Lot l, Rates rates) {
+        Object perTicket = totalRub(l, rates);
+        if (!(perTicket instanceof Long t)) {
+            return "";
+        }
+        return t * l.qty();
     }
 }
