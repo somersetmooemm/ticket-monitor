@@ -17,8 +17,10 @@ import java.util.*;
 
 public class SheetsWriter {
     private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(SheetsWriter.class);
-    static final String ACTUAL = "Актуальные";
-
+    static final String ACTUAL = "Актуальные для менеджеров";
+    static final String CLIENTS = "Актуальные для клиентов";
+    private static final List<Object> CLIENT_HEADER = List.of(
+            "Название концерта", "Страна", "Сектор", "Количество", "Итоговая сумма с комиссией (₽)");
     private static final List<Object> HEADER = List.of(
             "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
             "Цена за 1 шт.", "Валюта", "Итоговая стоимость за 1 шт. (₽)", "Макс. мест подряд", "Можно взять рядом (шт.)",
@@ -49,7 +51,9 @@ public class SheetsWriter {
      */
     public void write(List<Lot> lots, Set<String> failedEvents, List<String[]> errors) throws Exception {
         String now = ZonedDateTime.now(zone).format(fmt);
-        List<List<Object>> rows = prepareRows(lots, now, Rates.fetchCbr());
+        Rates rates = Rates.fetchCbr();
+        List<List<Object>> rows = prepareRows(lots, now, rates);
+        List<List<Object>> clientRows = prepareClientRows(lots, rates);
         LOG.info("sheets.replace.start collected={} failedEvents={} rows={}", lots.size(), failedEvents.size(), rows.size());
         // По требованию: сначала очищаем ВСЮ вкладку, затем записываем текущую выгрузку.
         // Это две операции API: если update упадёт после clear, лист останется пустым.
@@ -60,6 +64,30 @@ public class SheetsWriter {
                         new ValueRange().setValues(rows))
                 .setValueInputOption("RAW").execute();
         LOG.info("sheets.replace.complete currentLots={} failedEvents={}", lots.size(), failedEvents.size());
+
+        sheets.spreadsheets().values().clear(id, q(CLIENTS),
+                new com.google.api.services.sheets.v4.model.ClearValuesRequest()).execute();
+        sheets.spreadsheets().values().update(id, q(CLIENTS) + "!A1:E" + clientRows.size(),
+                        new ValueRange().setValues(clientRows))
+                .setValueInputOption("RAW").execute();
+        LOG.info("sheets.clients.complete sheet={} rows={}", CLIENTS, clientRows.size() - 1);
+    }
+
+    /** Лист для клиентов: концерт, страна, сектор, количество, итоговая сумма лота с комиссией. */
+    static List<List<Object>> prepareClientRows(List<Lot> lots, Rates rates) {
+        List<List<Object>> rows = new ArrayList<>();
+        for (Lot l : lots) {
+            rows.add(new ArrayList<>(Arrays.asList(l.event().name(), l.event().country(), l.place(),
+                    l.qty(), Cost.lotTotalRub(l, rates))));
+        }
+        rows.sort(Comparator.comparing((List<Object> r) -> String.valueOf(r.get(0)))
+                .thenComparing(r -> String.valueOf(r.get(1)))
+                .thenComparing(r -> String.valueOf(r.get(2)))
+                .thenComparingLong(r -> r.get(4) instanceof Long t ? t : Long.MAX_VALUE));
+        List<List<Object>> out = new ArrayList<>();
+        out.add(CLIENT_HEADER);
+        out.addAll(rows);
+        return out;
     }
 
     static List<List<Object>> prepareRows(List<Lot> lots, String now, Rates rates) {

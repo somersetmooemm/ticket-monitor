@@ -16,4 +16,11 @@ final class Cost {
         if (rate == null) return "";
         return Math.round(l.price() * rate + FEE_RUB);
     }
+
+    /** Сумма за весь лот (кол-во × итоговая стоимость 1 билета, комиссия уже включена) или "". */
+    static Object lotTotalRub(Lot l, Rates rates) {
+        Object perTicket = totalRub(l, rates);
+        if (!(perTicket instanceof Long t)) return "";
+        return t * l.qty();
+    }
 }
