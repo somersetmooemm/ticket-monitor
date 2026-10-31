@@ -9,7 +9,7 @@ class EventsLoaderTest {
     @Test
     void bundledEventConfigurationLoads() throws Exception {
         var events = EventsLoader.load();
-        assertEquals(20, events.size());
+        assertEquals(24, events.size());
         assertTrue(events.stream().allMatch(e -> !e.country().isBlank()));
         assertTrue(events.stream().allMatch(e -> !e.url().isBlank() && !e.platform().isBlank()));
         assertTrue(events.stream().allMatch(e -> e.platform().equals("tixxa") || e.platform().equals("tixbay")));

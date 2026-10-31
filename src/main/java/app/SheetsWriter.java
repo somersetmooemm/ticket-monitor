@@ -21,7 +21,7 @@ public class SheetsWriter {
     static final String CLIENTS = "Предложения для клиента";
 
     private static final List<Object> CLIENT_HEADER = List.of(
-            "Название концерта", "Страна", "Сектор", "Количество", "Итоговая сумма с комиссией (₽)");
+            "Название концерта", "Страна", "Сектор", "Количество", "Итоговая стоимость за 1 шт. (₽)");
 
     private static final List<Object> HEADER = List.of(
             "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
@@ -102,12 +102,12 @@ public class SheetsWriter {
         LOG.info("sheets.clients.complete sheet={} rows={}", sheet, clientRows.size() - 1);
     }
 
-    /** Данные для клиентской таблицы: концерт, страна, сектор, количество, итоговая сумма лота с комиссией. */
+    /** Данные для клиентской таблицы: концерт, страна, сектор, количество, итоговая стоимость одного билета с комиссией. */
     static List<List<Object>> prepareClientRows(List<Lot> lots, Rates rates) {
         List<List<Object>> rows = new ArrayList<>();
         for (Lot l : lots) {
             rows.add(new ArrayList<>(Arrays.asList(l.event().name(), l.event().country(), l.place(),
-                    l.qty(), Cost.lotTotalRub(l, rates))));
+                    l.qty(), Cost.totalRub(l, rates))));
         }
         rows.sort(Comparator.comparing((List<Object> r) -> String.valueOf(r.get(0)))
                 .thenComparing(r -> String.valueOf(r.get(1)))

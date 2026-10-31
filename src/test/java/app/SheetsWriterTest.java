@@ -60,6 +60,15 @@ class SheetsWriterTest {
     }
 
     @Test
+    void roundsUpToNextThousandAfterFee() {
+        Rates oneToOne = new Rates(java.util.Map.of("THB", 1.0));
+        assertEquals(58000L, Cost.totalRub(lotQty(1, 25963, "THB"), oneToOne));
+        assertEquals(58000L, Cost.totalRub(lotQty(1, 26000, "THB"), oneToOne));
+        assertEquals(59000L, Cost.totalRub(lotQty(1, 26001, "THB"), oneToOne));
+        assertEquals(58000L, Cost.totalRub(lotQty(5, 25963, "THB"), oneToOne));
+    }
+
+    @Test
     void unknownCurrencyGivesEmptyTotal() {
         assertEquals("", Cost.totalRub(lotQty(1, 100, "XYZ"), RATES));
     }
@@ -76,8 +85,8 @@ class SheetsWriterTest {
         Event e = new Event("tixbay", "BTS", "Bangkok", "Таиланд", "2026-12-12", "https://ticket.example/123");
         Lot l = new Lot(e, "x", "VIP", 3, "Zone 1", 4000, "THB", null, null, e.url());
         var rows = SheetsWriter.prepareClientRows(List.of(l), RATES);
-        assertEquals(List.of("Название концерта", "Страна", "Сектор", "Количество", "Итоговая сумма с комиссией (₽)"), rows.get(0));
-        assertEquals(List.of("BTS", "Таиланд", "Zone 1", 3, 126000L), rows.get(1)); // 3 * (4000*2.5 + 32000)
+        assertEquals(List.of("Название концерта", "Страна", "Сектор", "Количество", "Итоговая стоимость за 1 шт. (₽)"), rows.get(0));
+        assertEquals(List.of("BTS", "Таиланд", "Zone 1", 3, 42000L), rows.get(1)); // один билет: 4000*2.5 + 32000
     }
 
     @Test
