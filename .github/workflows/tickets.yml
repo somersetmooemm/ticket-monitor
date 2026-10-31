@@ -28,6 +28,7 @@ jobs:
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          CLIENTS_SPREADSHEET_ID: ${{ secrets.CLIENTS_SPREADSHEET_ID }}
           TIMEZONE: Europe/Moscow
           DEBUG_DUMP: "0"     # сохранять сырые JSON tixbay в артефакт; после отладки поставьте "0"
         run: mvn -B --no-transfer-progress compile exec:java

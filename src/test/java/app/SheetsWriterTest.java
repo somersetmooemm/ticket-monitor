@@ -70,4 +70,19 @@ class SheetsWriterTest {
         assertEquals(2.5, r.rub("THB"));
         assertEquals(80.0, r.rub("USD"));
     }
+
+    @Test
+    void clientRowsHaveSectorQtyAndTotalWithFee() {
+        Event e = new Event("tixbay", "BTS", "Bangkok", "Таиланд", "2026-12-12", "https://ticket.example/123");
+        Lot l = new Lot(e, "x", "VIP", 3, "Zone 1", 4000, "THB", null, null, e.url());
+        var rows = SheetsWriter.prepareClientRows(List.of(l), RATES);
+        assertEquals(List.of("Название концерта", "Страна", "Сектор", "Количество", "Итоговая сумма с комиссией (₽)"), rows.get(0));
+        assertEquals(List.of("BTS", "Таиланд", "Zone 1", 3, 126000L), rows.get(1)); // 3 * (4000*2.5 + 32000)
+    }
+
+    @Test
+    void clientTotalIsEmptyWithoutRate() {
+        var rows = SheetsWriter.prepareClientRows(List.of(lotQty(2, 100, "XYZ")), RATES);
+        assertEquals("", rows.get(1).get(4));
+    }
 }
