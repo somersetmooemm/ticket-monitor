@@ -18,7 +18,7 @@ import java.util.*;
 public class SheetsWriter {
     private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(SheetsWriter.class);
     static final String ACTUAL = "Предложения для менеджера";
-    static final String CLIENTS_MAIN = "Главная";
+    static final String CLIENTS = "Предложения для клиента";
 
     private static final List<Object> CLIENT_HEADER = List.of(
             "Название концерта", "Страна", "Сектор", "Количество", "Итоговая сумма с комиссией (₽)");
@@ -83,16 +83,16 @@ public class SheetsWriter {
         var first = sheets.spreadsheets().get(clientsId).setFields("sheets.properties(sheetId,title)").execute()
                 .getSheets().get(0).getProperties();
         String sheet = first.getTitle();
-        if (!CLIENTS_MAIN.equals(sheet)) { // первый лист должен называться «Главная»
+        if (!CLIENTS.equals(sheet)) {
             var rename = new com.google.api.services.sheets.v4.model.Request().setUpdateSheetProperties(
                     new com.google.api.services.sheets.v4.model.UpdateSheetPropertiesRequest()
                             .setProperties(new com.google.api.services.sheets.v4.model.SheetProperties()
-                                    .setSheetId(first.getSheetId()).setTitle(CLIENTS_MAIN))
+                                    .setSheetId(first.getSheetId()).setTitle(CLIENTS))
                             .setFields("title"));
             sheets.spreadsheets().batchUpdate(clientsId,
                     new com.google.api.services.sheets.v4.model.BatchUpdateSpreadsheetRequest()
                             .setRequests(List.of(rename))).execute();
-            sheet = CLIENTS_MAIN;
+            sheet = CLIENTS;
         }
         sheets.spreadsheets().values().clear(clientsId, q(sheet),
                 new com.google.api.services.sheets.v4.model.ClearValuesRequest()).execute();
@@ -102,7 +102,9 @@ public class SheetsWriter {
         LOG.info("sheets.clients.complete sheet={} rows={}", sheet, clientRows.size() - 1);
     }
 
-    /** Данные для клиентской таблицы: концерт, страна, сектор, количество, итоговая сумма лота с комиссией. */
+    /**
+     * Данные для клиентской таблицы: концерт, страна, сектор, количество, итоговая сумма лота с комиссией.
+     */
     static List<List<Object>> prepareClientRows(List<Lot> lots, Rates rates) {
         List<List<Object>> rows = new ArrayList<>();
         for (Lot l : lots) {
@@ -136,6 +138,21 @@ public class SheetsWriter {
         out.add(HEADER);
         out.addAll(rows);
         return out;
+    }
+
+    /**
+     * Создаёт лист с таким названием, если его нет в документе (иначе Sheets API отвечает «Unable to parse range»).
+     */
+    private void ensureSheet(String docId, String title) throws Exception {
+        var all = sheets.spreadsheets().get(docId).setFields("sheets.properties.title").execute().getSheets();
+        for (var sh : all) if (title.equals(sh.getProperties().getTitle())) return;
+        var add = new com.google.api.services.sheets.v4.model.Request().setAddSheet(
+                new com.google.api.services.sheets.v4.model.AddSheetRequest().setProperties(
+                        new com.google.api.services.sheets.v4.model.SheetProperties().setTitle(title)));
+        sheets.spreadsheets().batchUpdate(docId,
+                new com.google.api.services.sheets.v4.model.BatchUpdateSpreadsheetRequest()
+                        .setRequests(List.of(add))).execute();
+        LOG.info("sheets.created sheet={}", title);
     }
 
     private static String q(String sheet) {
