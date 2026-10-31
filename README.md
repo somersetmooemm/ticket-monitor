@@ -8,6 +8,7 @@
 3. В GitHub: Settings -> Secrets and variables -> Actions:
    - `GOOGLE_CREDENTIALS_JSON` - весь текст JSON-ключа;
    - `SPREADSHEET_ID` - часть ссылки на таблицу между `/d/` и `/edit`.
+   - `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` - бот и id группы для уведомлений о падении пайплайна (необязательно).
 4. Залить проект в репозиторий, на вкладке Actions запустить «Ticket monitor» кнопкой Run workflow.
 
 ## Добавление концертов
