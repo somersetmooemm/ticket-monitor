@@ -54,9 +54,9 @@ jobs:
           fi
           TEXT="❌ Обновление цен завершилось с ошибкой
           
-                      Сервис: Ticket monitor
-                      Логи запуска:
-                      ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          Сервис: Ticket monitor
+          Логи запуска:
+          ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           curl -sS --max-time 20 -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true
