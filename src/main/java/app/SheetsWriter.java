@@ -21,7 +21,7 @@ public class SheetsWriter {
     static final String CLIENTS = "Предложения для клиента";
 
     private static final List<Object> CLIENT_HEADER = List.of(
-            "Название концерта", "Страна", "Сектор", "Количество", "Итоговая стоимость за 1 шт. (₽)");
+            "Название концерта", "Страна", "Дата", "Сектор", "Количество", "Итоговая стоимость за 1 шт. (₽)");
 
     private static final List<Object> HEADER = List.of(
             "Концерт", "Город", "Дата", "Площадка", "Категория", "Кол-во", "Место",
@@ -96,23 +96,24 @@ public class SheetsWriter {
         }
         sheets.spreadsheets().values().clear(clientsId, q(sheet),
                 new com.google.api.services.sheets.v4.model.ClearValuesRequest()).execute();
-        sheets.spreadsheets().values().update(clientsId, q(sheet) + "!A1:E" + clientRows.size(),
+        sheets.spreadsheets().values().update(clientsId, q(sheet) + "!A1:F" + clientRows.size(),
                         new ValueRange().setValues(clientRows))
                 .setValueInputOption("RAW").execute();
         LOG.info("sheets.clients.complete sheet={} rows={}", sheet, clientRows.size() - 1);
     }
 
-    /** Данные для клиентской таблицы: концерт, страна, сектор, количество, итоговая стоимость одного билета с комиссией. */
+    /** Данные для клиентской таблицы: концерт, страна, дата, сектор, количество, итоговая стоимость одного билета с комиссией. */
     static List<List<Object>> prepareClientRows(List<Lot> lots, Rates rates) {
         List<List<Object>> rows = new ArrayList<>();
         for (Lot l : lots) {
-            rows.add(new ArrayList<>(Arrays.asList(l.event().name(), l.event().country(), l.place(),
+            rows.add(new ArrayList<>(Arrays.asList(l.event().name(), l.event().country(), l.event().date(), l.place(),
                     l.qty(), Cost.totalRub(l, rates))));
         }
         rows.sort(Comparator.comparing((List<Object> r) -> String.valueOf(r.get(0)))
                 .thenComparing(r -> String.valueOf(r.get(1)))
                 .thenComparing(r -> String.valueOf(r.get(2)))
-                .thenComparingLong(r -> r.get(4) instanceof Long t ? t : Long.MAX_VALUE));
+                .thenComparing(r -> String.valueOf(r.get(3)))
+                .thenComparingLong(r -> r.get(5) instanceof Long t ? t : Long.MAX_VALUE));
         List<List<Object>> out = new ArrayList<>();
         out.add(CLIENT_HEADER);
         out.addAll(rows);

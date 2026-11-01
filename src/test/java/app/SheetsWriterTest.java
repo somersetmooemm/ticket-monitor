@@ -85,13 +85,13 @@ class SheetsWriterTest {
         Event e = new Event("tixbay", "BTS", "Bangkok", "Таиланд", "2026-12-12", "https://ticket.example/123");
         Lot l = new Lot(e, "x", "VIP", 3, "Zone 1", 4000, "THB", null, null, e.url());
         var rows = SheetsWriter.prepareClientRows(List.of(l), RATES);
-        assertEquals(List.of("Название концерта", "Страна", "Сектор", "Количество", "Итоговая стоимость за 1 шт. (₽)"), rows.get(0));
-        assertEquals(List.of("BTS", "Таиланд", "Zone 1", 3, 42000L), rows.get(1)); // один билет: 4000*2.5 + 32000
+        assertEquals(List.of("Название концерта", "Страна", "Дата", "Сектор", "Количество", "Итоговая стоимость за 1 шт. (₽)"), rows.get(0));
+        assertEquals(List.of("BTS", "Таиланд", "2026-12-12", "Zone 1", 3, 42000L), rows.get(1)); // один билет: 4000*2.5 + 32000
     }
 
     @Test
     void clientTotalIsEmptyWithoutRate() {
         var rows = SheetsWriter.prepareClientRows(List.of(lotQty(2, 100, "XYZ")), RATES);
-        assertEquals("", rows.get(1).get(4));
+        assertEquals("", rows.get(1).get(5));
     }
 }
