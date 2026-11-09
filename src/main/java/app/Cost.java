@@ -6,7 +6,7 @@ import java.math.RoundingMode;
 final class Cost {
 
     private static final BigDecimal FEE_RUB = new BigDecimal("32000");
-    private static final BigDecimal RATE_MARKUP = new BigDecimal("1.10");
+    private static final BigDecimal RATE_MARKUP = new BigDecimal("1.08");
     private static final BigDecimal THOUSAND = new BigDecimal("1000");
 
     private Cost() {
