@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   run:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: GOOGLE_CREDENTIALS_JSON
     timeout-minutes: 25
     steps:
@@ -23,8 +23,33 @@ jobs:
           java-version: "17"
           cache: maven
 
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-1.48.0
+
       - name: Install Chromium for Playwright
-        run: mvn -B --no-transfer-progress exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.args="install --with-deps chromium"
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        run: |
+          for i in 1 2 3; do
+            mvn -B --no-transfer-progress exec:java \
+              -Dexec.mainClass=com.microsoft.playwright.CLI \
+              -Dexec.args="install chromium" && exit 0
+            echo "Попытка $i не удалась, повтор через 20с"; sleep 20
+          done
+          exit 1
+
+      - name: Install system deps for Chromium (non-critical)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          mvn -B --no-transfer-progress exec:java \
+            -Dexec.mainClass=com.microsoft.playwright.CLI \
+            -Dexec.args="install-deps chromium"
 
       - name: Collect tickets
         env:
@@ -32,7 +57,7 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           CLIENTS_SPREADSHEET_ID: ${{ secrets.CLIENTS_SPREADSHEET_ID }}
           TIMEZONE: Europe/Moscow
-          DEBUG_DUMP: "0"     # сохранять сырые JSON tixbay в артефакт; после отладки поставьте "0"
+          DEBUG_DUMP: "0"
         run: mvn -B --no-transfer-progress compile exec:java
 
       - name: Upload debug JSON
@@ -56,7 +81,7 @@ jobs:
             echo "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID не заданы, уведомление пропущено"; exit 0
           fi
           TEXT="❌ Обновление цен завершилось с ошибкой
-          
+
           Сервис: Ticket monitor
           Логи запуска:
           ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
