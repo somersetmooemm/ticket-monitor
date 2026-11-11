@@ -30,18 +30,6 @@ jobs:
           path: ~/.cache/ms-playwright
           key: pw-${{ runner.os }}-1.48.0
 
-      - name: Install Chromium for Playwright
-        if: steps.pw-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 10
-        run: |
-          for i in 1 2 3; do
-            mvn -B --no-transfer-progress exec:java \
-              -Dexec.mainClass=com.microsoft.playwright.CLI \
-              -Dexec.args="install chromium" && exit 0
-            echo "Попытка $i не удалась, повтор через 20с"; sleep 20
-          done
-          exit 1
-
       - name: Install system deps for Chromium (non-critical)
         if: steps.pw-cache.outputs.cache-hit != 'true'
         continue-on-error: true
