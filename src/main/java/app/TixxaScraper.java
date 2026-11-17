@@ -1,23 +1,23 @@
-
 package app;
 
-import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
-import com.microsoft.playwright.options.AriaRole;
-import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.WaitUntilState;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * tixxa.co: список лотов выводится на странице события,
- * по 6 штук на страницу пагинации.
+ * по 6 штук на страницу. Страницы открываются по URL ?page=N.
+ * Конец выгрузки определяется по пустой странице ("No tickets available yet").
  * Цена за 1 билет, без доставки.
  */
 public class TixxaScraper {
@@ -27,7 +27,8 @@ public class TixxaScraper {
 
     private static final int OPEN_RETRIES = 3;
     private static final int MAX_PAGES = 80;
-    private static final int PAGE_SIZE = 6;
+
+    private static final String EMPTY_TEXT = "No tickets available yet";
 
     private static final Pattern EVENT_ID =
             Pattern.compile("-(\\d+)/?$");
@@ -36,9 +37,13 @@ public class TixxaScraper {
             "^\\d{2} \\d{2}/\\d{2} (.*?)\\s*Ticket original price ([\\d,.]+) ([A-Z]{3}) "
             + "Quantity (\\d+) Tickets?\\b(.*?)([\\d,]+\\.\\d{2}) ([A-Z]{3}) / Ticket$");
 
-    private static final String FIRST_LOT_JS =
-            "prev => { const a = [...document.querySelectorAll('a[href]')]"
-            + ".find(x => /-\\d+\\/\\d+$/.test(x.href)); return !a || a.href !== prev; }";
+    /**
+     * Ждём, пока на странице появятся ссылки на лоты либо заглушка "нет билетов".
+     */
+    private static final String LISTING_READY_JS =
+            "src => { const re = new RegExp(src);"
+            + " if ((document.body.innerText || '').includes('" + EMPTY_TEXT + "')) return true;"
+            + " return [...document.querySelectorAll('a[href]')].some(a => re.test(a.href)); }";
 
     /**
      * Исключение с сохранением уже собранных лотов.
@@ -61,6 +66,49 @@ public class TixxaScraper {
         }
     }
 
+    /**
+     * Состояние страницы до сбора лотов.
+     */
+    enum PageState {
+        /** На странице есть лоты, собираем. */
+        CONTINUE,
+        /** Пустая страница после непустых: выгрузка закончена. */
+        FINISH,
+        /** Пустая первая страница: у события нет лотов. */
+        EMPTY_EVENT
+    }
+
+    /**
+     * Решение по странице. Лоты важнее заглушки; страница без лотов и без
+     * заглушки считается недогруженной, а не последней.
+     */
+    static PageState classifyPage(int pageNumber, boolean emptyMarker, int lotLinks) {
+
+        if (lotLinks > 0) {
+            return PageState.CONTINUE;
+        }
+
+        if (emptyMarker) {
+            return pageNumber == 1 ? PageState.EMPTY_EVENT : PageState.FINISH;
+        }
+
+        throw new IllegalStateException(
+                "tixxa: страница " + pageNumber
+                + " без лотов и без заглушки; сбор неполный"
+        );
+    }
+
+    /**
+     * Сайт вернул ту же страницу вместо пустой: новых лотов нет.
+     */
+    static boolean isRepeatedPage(int pageNumber, int added) {
+        return pageNumber > 1 && added == 0;
+    }
+
+    static String pageUrl(String baseUrl, int n) {
+        return baseUrl + (baseUrl.contains("?") ? "&" : "?") + "page=" + n;
+    }
+
     public List<Lot> scrape(Page page, Event ev) {
 
         Matcher m = EVENT_ID.matcher(ev.url());
@@ -76,22 +124,15 @@ public class TixxaScraper {
 
         List<String> jsonUrls = new CopyOnWriteArrayList<>();
 
-        page.onResponse(r -> {
+        Consumer<com.microsoft.playwright.Response> listener = r -> {
             if (r.headers().getOrDefault("content-type", "").contains("json")) {
                 String u = r.url();
                 int q = u.indexOf('?');
                 jsonUrls.add(q > 0 ? u.substring(0, q) : u);
             }
-        });
+        };
 
-        page.navigate(
-                ev.url(),
-                new Page.NavigateOptions()
-                        .setWaitUntil(WaitUntilState.NETWORKIDLE)
-                        .setTimeout(60_000)
-        );
-
-        page.waitForTimeout(1500);
+        page.onResponse(listener);
 
         Map<String, Lot> lots = new LinkedHashMap<>();
 
@@ -100,11 +141,38 @@ public class TixxaScraper {
 
         try {
 
+            page.navigate(
+                    ev.url(),
+                    new Page.NavigateOptions()
+                            .setWaitUntil(WaitUntilState.NETWORKIDLE)
+                            .setTimeout(60_000)
+            );
+
+            waitForListing(page, hrefPattern);
+
             for (int p = 1; p <= MAX_PAGES; p++) {
 
-                int before = lots.size();
+                int onPage = countLotLinks(page, hrefPattern);
 
-                String firstHref = firstLotHref(page, hrefPattern);
+                PageState state = classifyPage(p, isEmptyPage(page), onPage);
+
+                if (state == PageState.EMPTY_EVENT) {
+                    LOG.info("tixxa.empty event={}", ev.date());
+                    return List.of();
+                }
+
+                if (state == PageState.FINISH) {
+
+                    LOG.info(
+                            "tixxa.pagination.end event={} page={} reason=empty-page",
+                            ev.date(), p
+                    );
+
+                    finished = true;
+                    break;
+                }
+
+                int before = lots.size();
 
                 int invalid = collect(page, ev, hrefPattern, lots);
 
@@ -119,61 +187,16 @@ public class TixxaScraper {
 
                 int added = lots.size() - before;
 
-                requireNewLots(p, added);
-
-                int advertisedLast = lastPageNumber(page);
-
-                if (advertisedLast > MAX_PAGES) {
-                    throw new IllegalStateException(
-                            "tixxa: страниц больше лимита " + MAX_PAGES
-                    );
-                }
-
                 LOG.info(
-                        "tixxa.page event={} page={} added={} total={} advertisedLast={}",
-                        ev.date(), p, added, lots.size(), advertisedLast
+                        "tixxa.page event={} page={} onPage={} added={} total={} advertisedLast={}",
+                        ev.date(), p, onPage, added, lots.size(), lastPageNumber(page)
                 );
 
-                if (advertisedLast > 0 && p >= advertisedLast) {
-                    finished = true;
-                    break;
-                }
-
-                boolean nextAvailable = hasNextPage(page);
-
-                if (isLastShortPage(advertisedLast, added, nextAvailable)) {
-                    LOG.info(
-                            "tixxa.pagination.end event={} page={} reason=short-page-no-next added={}",
-                            ev.date(), p, added
-                    );
-
-                    finished = true;
-                    break;
-                }
-
-                boolean disabledNext = hasDisabledNext(page);
-                boolean activeCurrent = hasActivePageMarker(page, p);
-                boolean nextNumber = hasPageNumber(page, p + 1);
-
-                LOG.info(
-                        "tixxa.pagination.state event={} page={} activeCurrent={} "
-                        + "nextAvailable={} disabledNext={} nextNumber={} added={}",
-                        ev.date(), p, activeCurrent,
-                        nextAvailable, disabledNext, nextNumber, added
-                );
-
-                if (shouldFinishAtFullPage(
-                        advertisedLast,
-                        p,
-                        added,
-                        activeCurrent,
-                        nextAvailable,
-                        nextNumber,
-                        disabledNext
-                )) {
+                // Сайт вернул ту же страницу вместо пустой: вышли за предел
+                if (isRepeatedPage(p, added)) {
 
                     LOG.info(
-                            "tixxa.pagination.end event={} page={} reason=confirmed-last-full-page",
+                            "tixxa.pagination.end event={} page={} reason=no-new-lots",
                             ev.date(), p
                     );
 
@@ -181,34 +204,7 @@ public class TixxaScraper {
                     break;
                 }
 
-                if (!nextAvailable
-                    && !nextNumber
-                    && !activeCurrent
-                    && added == PAGE_SIZE) {
-
-                    LOG.warn(
-                            "tixxa.pagination.ambiguous event={} page={} "
-                            + "reason=no-current-marker-or-next; trying-navigation",
-                            ev.date(), p
-                    );
-                }
-
-                if (!openPage(page, p + 1, firstHref)) {
-
-                    if (advertisedLast == 0
-                        && hasDisabledNext(page)
-                        && !hasPageNumber(page, p + 1)) {
-
-                        finished = true;
-
-                        LOG.info(
-                                "tixxa.pagination.end event={} page={} reason=disabled-next",
-                                ev.date(), p
-                        );
-
-                        break;
-                    }
-
+                if (!openPage(page, ev.url(), p + 1, hrefPattern)) {
                     throw new IllegalStateException(
                             "tixxa: не удалось открыть страницу " + (p + 1)
                             + "; прочитано " + p
@@ -245,6 +241,9 @@ public class TixxaScraper {
                     ex,
                     partial
             );
+
+        } finally {
+            page.offResponse(listener);
         }
 
         LOG.info(
@@ -259,143 +258,82 @@ public class TixxaScraper {
     }
 
     /**
-     * Определение последней страницы.
+     * Номер последней страницы по ссылкам ?page=N. Только для логов:
+     * на завершение выгрузки не влияет.
      */
     private int lastPageNumber(Page page) {
 
-        Object result = page.evaluate("""
-                () => Array.from(document.querySelectorAll(
-                    'nav button, nav a, [class*=pagination] button, ' +
-                    '[class*=pagination] a, [aria-label*=pagination] button'
-                ))
-                .map(x => (x.textContent || '').trim())
-                .filter(x => /^\\d+$/.test(x))
-                .map(Number)
-                """);
+        try {
+            Object result = page.evaluate("""
+                    () => Array.from(document.querySelectorAll('a[href*="page="]'))
+                        .map(a => {
+                            const m = a.href.match(/[?&]page=(\\d+)/);
+                            return m ? Number(m[1]) : 0;
+                        })
+                    """);
 
-        int max = 0;
+            int max = 0;
 
-        if (result instanceof List<?> numbers) {
-            for (Object value : numbers) {
-                if (value instanceof Number n) {
-                    max = Math.max(max, n.intValue());
+            if (result instanceof List<?> numbers) {
+                for (Object value : numbers) {
+                    if (value instanceof Number n) {
+                        max = Math.max(max, n.intValue());
+                    }
                 }
             }
+
+            return max;
+
+        } catch (Exception ex) {
+            return 0;
         }
-
-        return max;
     }
 
-    static boolean isLastShortPage(
-            int advertisedLast,
-            int added,
-            boolean nextAvailable
-    ) {
-        return advertisedLast == 0
-               && added < PAGE_SIZE
-               && !nextAvailable;
+    private boolean isEmptyPage(Page page) {
+
+        return Boolean.TRUE.equals(page.evaluate(
+                "() => (document.body.innerText || '').includes('" + EMPTY_TEXT + "')"
+        ));
     }
 
-    static boolean shouldFinishAtFullPage(
-            int advertisedLast,
-            int pageNumber,
-            int added,
-            boolean activeCurrent,
-            boolean nextAvailable,
-            boolean nextNumber,
-            boolean disabledNext
-    ) {
-        return advertisedLast == 0
-               && added == PAGE_SIZE
-               && (activeCurrent || disabledNext)
-               && !nextAvailable
-               && !nextNumber;
+    private void waitForListing(Page page, Pattern hrefPattern) {
+
+        try {
+            page.waitForFunction(
+                    LISTING_READY_JS,
+                    hrefPattern.pattern(),
+                    new Page.WaitForFunctionOptions().setTimeout(10_000)
+            );
+        } catch (Exception ex) {
+            LOG.warn(
+                    "tixxa.listing.wait.failed url={} reason={}",
+                    page.url(),
+                    shortReason(ex)
+            );
+        }
     }
 
-    private boolean hasActivePageMarker(Page page, int current) {
-
-        return Boolean.TRUE.equals(page.evaluate("""
-                n => [...document.querySelectorAll(
-                    '[aria-current="page"], [class*="pagination"] .active, ' +
-                    'nav .active, [class*="pagination"] [class*="selected"], ' +
-                    'nav [class*="selected"]'
-                )]
-                .some(e => (e.textContent || '').trim() === String(n))
-                """, current));
-    }
-
-    private boolean hasPageNumber(Page page, int target) {
-
-        return Boolean.TRUE.equals(page.evaluate("""
-                n => [...document.querySelectorAll(
-                    'nav a, nav button, [class*="pagination"] a, ' +
-                    '[class*="pagination"] button, [class*="pagination"] li, ' +
-                    '[aria-label*="pagination"] a, [aria-label*="pagination"] button'
-                )]
-                .some(e =>
-                    (e.textContent || '').trim() === String(n)
-                    && !e.disabled
-                    && e.getAttribute('aria-disabled') !== 'true'
-                )
-                """, target));
-    }
-
-    private boolean hasNextPage(Page page) {
-
-        return Boolean.TRUE.equals(page.evaluate("""
-                () => [...document.querySelectorAll(
-                    'button,a,[role=button]'
-                )].some(e => {
-                    const txt = (
-                        e.getAttribute('aria-label') ||
-                        e.textContent || ''
-                    ).trim().toLowerCase();
-
-                    const next = /^(next|next page|›|»|→|>)$/.test(txt);
-
-                    return next
-                        && !e.disabled
-                        && e.getAttribute('aria-disabled') !== 'true'
-                        && !e.closest('[aria-disabled=true], .disabled');
-                })
-                """));
-    }
-
-    private boolean hasDisabledNext(Page page) {
-
-        return Boolean.TRUE.equals(page.evaluate("""
-                () => [...document.querySelectorAll(
-                    'button,a,[role=button]'
-                )].some(e => {
-                    const txt = (
-                        e.getAttribute('aria-label') ||
-                        e.textContent || ''
-                    ).trim().toLowerCase();
-
-                    return /^(next|next page|›|»|→|>)$/.test(txt)
-                        && (
-                            e.disabled ||
-                            e.getAttribute('aria-disabled') === 'true' ||
-                            !!e.closest('[aria-disabled=true], .disabled')
-                        );
-                })
-                """));
-    }
-
-    private String firstLotHref(Page page, Pattern hrefPattern) {
+    /**
+     * Количество уникальных ссылок на лоты на текущей странице.
+     */
+    private int countLotLinks(Page page, Pattern hrefPattern) {
 
         Object res = page.evalOnSelectorAll(
                 "a[href]",
                 "els => els.map(e => e.href)"
         );
 
+        Set<String> unique = new HashSet<>();
+
         for (Object o : (List<?>) res) {
-            if (hrefPattern.matcher(String.valueOf(o)).find()) {
-                return String.valueOf(o);
+            String href = String.valueOf(o);
+
+            if (hrefPattern.matcher(href).find()) {
+                unique.add(href);
             }
         }
 
-        return "";
+        return unique.size();
     }
 
     private int collect(
@@ -450,16 +388,6 @@ public class TixxaScraper {
         return invalid;
     }
 
-    static void requireNewLots(int pageNumber, int added) {
-
-        if (added <= 0) {
-            throw new IllegalStateException(
-                    "tixxa: страница " + pageNumber
-                    + " не дала новых лотов; сбор неполный"
-            );
-        }
-    }
-
     static Lot parseLot(Event ev, String href, String text) {
 
         Matcher eventMatch = EVENT_ID.matcher(ev.url());
@@ -506,13 +434,16 @@ public class TixxaScraper {
     }
 
     /**
-     * Повторные попытки навигации.
+     * Открытие страницы N по URL ?page=N с повторными попытками.
      */
     private boolean openPage(
             Page page,
+            String baseUrl,
             int n,
-            String previousHref
+            Pattern hrefPattern
     ) {
+
+        String url = pageUrl(baseUrl, n);
 
         for (int attempt = 1; attempt <= OPEN_RETRIES; attempt++) {
 
@@ -521,18 +452,32 @@ public class TixxaScraper {
                     n, attempt, OPEN_RETRIES
             );
 
-            if (tryOpenPage(page, n, previousHref)) {
+            try {
+
+                page.navigate(
+                        url,
+                        new Page.NavigateOptions()
+                                .setWaitUntil(WaitUntilState.NETWORKIDLE)
+                                .setTimeout(30_000)
+                );
+
+                waitForListing(page, hrefPattern);
+
+                LOG.info("tixxa.navigation.ok targetPage={}", n);
+
                 return true;
+
+            } catch (Exception ex) {
+
+                LOG.warn(
+                        "tixxa.navigation.failed page={} attempt={} reason={}",
+                        n,
+                        attempt,
+                        shortReason(ex)
+                );
+
+                page.waitForTimeout(1000L * attempt);
             }
-
-            LOG.warn(
-                    "tixxa.navigation.failed page={} attempt={} currentUrl={}",
-                    n,
-                    attempt,
-                    page.url()
-            );
-
-            page.waitForTimeout(1000L * attempt);
         }
 
         LOG.error("tixxa.navigation.exhausted page={}", n);
@@ -556,86 +501,5 @@ public class TixxaScraper {
                 0,
                 Math.min(firstLine.length(), 350)
         );
-    }
-
-    private boolean tryOpenPage(
-            Page page,
-            int n,
-            String firstHref
-    ) {
-
-        String exact = "^\\s*" + n + "\\s*$";
-
-        List<Locator> candidates = List.of(
-                page.getByRole(AriaRole.LISTITEM)
-                        .filter(new Locator.FilterOptions()
-                                .setHasText(Pattern.compile(exact))),
-
-                page.getByRole(
-                        AriaRole.BUTTON,
-                        new Page.GetByRoleOptions()
-                                .setName(String.valueOf(n))
-                                .setExact(true)
-                ),
-
-                page.getByText(
-                        String.valueOf(n),
-                        new Page.GetByTextOptions()
-                                .setExact(true)
-                ),
-
-                page.locator(
-                        "[aria-label*='next' i], "
-                        + "button:has-text('›'), "
-                        + "button:has-text('>'), "
-                        + "li:has-text('›')"
-                )
-        );
-
-        for (int i = 0; i < candidates.size(); i++) {
-
-            Locator c = candidates.get(i);
-
-            try {
-
-                if (c.count() == 0) {
-                    continue;
-                }
-
-                c.first().click(
-                        new Locator.ClickOptions()
-                                .setTimeout(4_000)
-                );
-
-                page.waitForFunction(
-                        FIRST_LOT_JS,
-                        firstHref,
-                        new Page.WaitForFunctionOptions()
-                                .setTimeout(8_000)
-                );
-
-                page.waitForLoadState(LoadState.NETWORKIDLE);
-
-                LOG.info(
-                        "tixxa.navigation.ok targetPage={} strategy={}",
-                        n, i
-                );
-
-                return true;
-
-            } catch (Exception ex) {
-
-                LOG.warn(
-                        "tixxa.navigation.strategy.failed page={} "
-                        + "strategy={} locatorCount={} reason={}",
-                        n,
-                        i,
-                        c.count(),
-                        shortReason(ex)
-                );
-            }
-        }
-
-        return false;
     }
 }
