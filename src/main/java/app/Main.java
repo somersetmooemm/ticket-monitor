@@ -1,3 +1,4 @@
+
 package app;
 
 import com.microsoft.playwright.*;
@@ -9,21 +10,42 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 public class Main {
-    private static final org.apache.logging.log4j.Logger LOG = org.apache.logging.log4j.LogManager.getLogger(Main.class);
+
+    private static final org.apache.logging.log4j.Logger LOG =
+            org.apache.logging.log4j.LogManager.getLogger(Main.class);
+
+    private static final String UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     static boolean tooManyFailures(int total, int failed) {
-        if (total <= 0) throw new IllegalArgumentException("Количество событий должно быть положительным");
-        if (failed < 0 || failed > total) throw new IllegalArgumentException("Некорректное количество ошибок");
+
+        if (total <= 0) {
+            throw new IllegalArgumentException(
+                    "Количество событий должно быть положительным"
+            );
+        }
+
+        if (failed < 0 || failed > total) {
+            throw new IllegalArgumentException(
+                    "Некорректное количество ошибок"
+            );
+        }
+
         return (long) failed * 4 >= total;
     }
 
-    private static final String UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                                     + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-
     public static void main(String[] args) throws Exception {
+
         List<Event> events = EventsLoader.load();
+
         LOG.info("run.start events={}", events.size());
-        if (events.isEmpty()) throw new IllegalStateException("Список событий пуст: не обновляем таблицу");
+
+        if (events.isEmpty()) {
+            throw new IllegalStateException(
+                    "Список событий пуст: не обновляем таблицу"
+            );
+        }
 
         SheetsWriter sheets = new SheetsWriter();
 
@@ -32,41 +54,122 @@ public class Main {
         List<String[]> errors = new ArrayList<>();
 
         try (Playwright pw = Playwright.create()) {
-            Browser browser = pw.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+
+            Browser browser = pw.chromium().launch(
+                    new BrowserType.LaunchOptions()
+                            .setHeadless(true)
+            );
+
             TixxaScraper tixxa = new TixxaScraper();
             TixbayScraper tixbay = new TixbayScraper();
 
             for (Event e : events) {
-                String label = e.name() + " " + e.city() + " " + e.date() + " [" + e.platform() + "]";
-                BrowserContext ctx = browser.newContext(new Browser.NewContextOptions()
-                        .setUserAgent(UA).setLocale("en-US").setViewportSize(1400, 1000));
-                Page page = ctx.newPage();
+
+                String label = e.name()
+                               + " " + e.city()
+                               + " " + e.date()
+                               + " [" + e.platform() + "]";
+
+                BrowserContext ctx = browser.newContext(
+                        new Browser.NewContextOptions()
+                                .setUserAgent(UA)
+                                .setLocale("en-US")
+                                .setViewportSize(1400, 1000)
+                );
+
                 try {
+
+                    Page page = ctx.newPage();
+
                     List<Lot> lots = switch (e.platform()) {
                         case "tixxa" -> tixxa.scrape(page, e);
                         case "tixbay" -> tixbay.scrape(page, e);
-                        default -> throw new IllegalArgumentException("Неизвестная площадка: " + e.platform());
+                        default -> throw new IllegalArgumentException(
+                                "Неизвестная площадка: " + e.platform()
+                        );
                     };
-                    if (lots.isEmpty())
-                        throw new IllegalStateException("Парсер вернул 0 лотов: данные не подтверждены");
-                    LOG.info("event.ok label={} count={}", label, lots.size());
+
+                    if (lots.isEmpty()) {
+                        throw new IllegalStateException(
+                                "Парсер вернул 0 лотов: данные не подтверждены"
+                        );
+                    }
+
+                    LOG.info(
+                            "event.ok label={} count={}",
+                            label,
+                            lots.size()
+                    );
+
                     all.addAll(lots);
-                } catch (Exception ex) {
-                    LOG.error("event.failed label={} reason={}", label, ex.toString());
+
+                } catch (TixxaScraper.PartialScrapeException ex) {
+
+                    List<Lot> partial = ex.getPartialLots();
+
+                    all.addAll(partial);
+
                     failed.add(e.url());
-                    errors.add(new String[]{label, String.valueOf(ex.getMessage())});
+
+                    errors.add(new String[]{
+                            label,
+                            "НЕ ПРОВЕРЕНО: " + ex.getMessage()
+                    });
+
+                    LOG.warn(
+                            "event.partial label={} savedLots={} reason={}",
+                            label,
+                            partial.size(),
+                            ex.getMessage()
+                    );
+
+                } catch (Exception ex) {
+
+                    LOG.error(
+                            "event.failed label={} reason={}",
+                            label,
+                            ex.toString()
+                    );
+
+                    failed.add(e.url());
+
+                    errors.add(new String[]{
+                            label,
+                            String.valueOf(ex.getMessage())
+                    });
+
                 } finally {
                     ctx.close();
                 }
-                Thread.sleep(2000 + ThreadLocalRandom.current().nextInt(3000));
+
+                Thread.sleep(
+                        2000 + ThreadLocalRandom.current().nextInt(3000)
+                );
             }
+
             browser.close();
         }
 
-        sheets.write(all, failed, errors);
-        LOG.info("run.end collected={} failed={} total={}", all.size(), errors.size(), events.size());
+        LOG.info(
+                "run.scraping.complete collected={} failed={} total={}",
+                all.size(),
+                failed.size(),
+                events.size()
+        );
 
-        // Запуск считается неуспешным, если не собралась четверть событий и больше - GitHub пришлёт письмо
-        if (tooManyFailures(events.size(), failed.size())) System.exit(1);
+        sheets.write(all, failed, errors);
+
+        LOG.info(
+                "run.end collected={} failed={} total={}",
+                all.size(),
+                errors.size(),
+                events.size()
+        );
+
+        // Запуск считается неуспешным, если не собралась
+        // четверть событий и больше.
+        if (tooManyFailures(events.size(), failed.size())) {
+            System.exit(1);
+        }
     }
 }

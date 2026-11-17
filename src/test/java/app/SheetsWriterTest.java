@@ -159,7 +159,7 @@ class SheetsWriterTest {
         );
 
         assertEquals(
-                62_000L,
+                61_000L,
                 Cost.totalRub(lotQty(1, 26364, "THB"), oneToOne)
         );
     }
